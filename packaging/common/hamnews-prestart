@@ -1,0 +1,26 @@
+#!/bin/sh
+# hamnews.service helper.
+#   hamnews-prestart check   ExecCondition: skip the start (no restart loop) while
+#                            inn.conf still says CHANGEME
+#   hamnews-prestart         ExecStartPre (as root): create the databases on first start
+set -eu
+B=/usr/lib/hamnews/bin
+DB=/var/lib/hamnews
+CONF=/etc/hamnews/inn.conf
+
+if grep -Eq '^(pathhost|domain):[[:space:]]*CHANGEME' "$CONF"; then
+    echo "hamnews: set pathhost and domain in $CONF to your callsign, then start again" >&2
+    exit 1
+fi
+[ "${1:-}" = check ] && exit 0
+
+if [ ! -e "$DB/active" ]; then
+    echo "hamnews: creating news databases in $DB"
+    install -d -o news -g news -m 0750 "$DB"
+    install -o news -g news -m 0664 /usr/share/hamnews/active "$DB/active"
+    install -o news -g news -m 0664 /usr/share/hamnews/newsgroups "$DB/newsgroups"
+    for f in active.times history; do
+        install -o news -g news -m 0664 /dev/null "$DB/$f"
+    done
+    runuser -u news -- "$B/makedbz" -i -o
+fi

@@ -1,0 +1,5 @@
+hamnews (0.1-1) bookworm; urgency=medium
+
+  * First package: INN 2.7.4 in the hamnews namespace, and hnlink.
+
+ -- KN6FLN <lweith@gmail.com>  Fri, 06 Nov 2026 00:31:41 -0500

@@ -1,0 +1,39 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+
+CONF=/etc/hnlink.conf
+
+# setkey KEY VALUE: replace KEY=... in $CONF (any characters allowed in VALUE).
+setkey() {
+    K=$1 V=$2 awk '
+        BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"] }
+        index($0, k "=") == 1 { print k "=" v; done = 1; next }
+        { print }
+        END { if (!done) print k "=" v }
+    ' "$CONF" > "$CONF.dpkg-tmp"
+    chmod 644 "$CONF.dpkg-tmp"
+    mv "$CONF.dpkg-tmp" "$CONF"
+}
+
+case "$1" in
+configure)
+    [ -e "$CONF" ] || install -m644 /usr/share/hnlink/hnlink.conf.dist "$CONF"
+    db_get hnlink/call
+    call=$(printf '%s' "$RET" | tr 'a-z' 'A-Z')
+    if [ -n "$call" ]; then
+        setkey CALL "$call"
+        db_get hnlink/from
+        # One line only: it goes into an environment file.
+        setkey FROM "$(printf '%s' "$RET" | tr -d '\r\n')"
+    else
+        echo "hnlink: set CALL in $CONF (or: dpkg-reconfigure hnlink), then: systemctl restart hnlink" >&2
+    fi
+    ;;
+esac
+
+db_stop
+
+#DEBHELPER#
+
+exit 0

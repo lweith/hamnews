@@ -1,0 +1,55 @@
+--- a/src/utils/amp.cxx
++++ b/src/utils/amp.cxx
+@@ -965,6 +965,43 @@
+ }
+ 
+ /** ********************************************************
++ * The FILE header's filename arrives off the air and is later joined onto
++ * the rx and relay directories (auto_rx_save_file, relay_write_save), so it
++ * must be a single plain path component: no separators, no "."/"..", no
++ * leading dot, no control characters, bounded length.
++ ***********************************************************/
++static std::string sanitize_rx_filename(const std::string &raw)
++{
++	std::string fn = raw;
++
++	// Keep only the last component under either separator convention.
++	size_t sep = fn.find_last_of("/\\");
++	if (sep != std::string::npos)
++		fn.erase(0, sep + 1);
++
++	for (size_t i = 0; i < fn.size(); i++) {
++		unsigned char c = (unsigned char) fn[i];
++		if (c < 0x20 || c == 0x7f || c == ':')
++			fn[i] = '_';
++	}
++
++	// No hidden files, and "." / ".." become "_" / "_.".
++	while (!fn.empty() && fn[0] == '.')
++		fn[0] = '_';
++
++	if (fn.size() > 200)
++		fn.erase(200);
++
++	if (fn.empty())
++		fn.assign("unassigned");
++
++	if (fn != raw)
++		LOG_INFO("rx filename sanitized: \"%s\" -> \"%s\"", raw.c_str(), fn.c_str());
++
++	return fn;
++}
++
++/** ********************************************************
+  *
+  ***********************************************************/
+ void cAmp::rx_parse_dttm_filename(char *crc, std::string data)
+@@ -979,7 +1016,7 @@
+ 	size_t pcolon = data.find(":");
+ 	if (pcolon == std::string::npos) return;
+ 	rxdttm = data.substr(0, pcolon);
+-	rxfilename = data.substr(pcolon + 1);
++	rxfilename = sanitize_rx_filename(data.substr(pcolon + 1));
+ 	rxhash = crc;
+ 	rx_crc_flags &= ~FILE_CRC_FLAG;
+ }

@@ -1,0 +1,29 @@
+# Maintainer: Loren Weith <lweith@gmail.com>
+pkgname=flamp
+pkgver=2.2.14
+pkgrel=2
+pkgdesc="Amateur Multicast Protocol file transfer (w1hkj), with rx filename traversal fix"
+arch=('x86_64')
+url="https://sourceforge.net/projects/fldigi/files/flamp/"
+license=('GPL-3.0-or-later')
+depends=('fltk' 'flxmlrpc' 'libx11')
+source=("$pkgname-$pkgver.tar.gz"
+        "rx-filename-traversal.patch")
+sha256sums=('db8f7dd481db7661c80d7afaa43b044360ee6072d3f3faa1f362b1043a421cb2'
+            '7b3ed8f07862d35d22ec3073b2744c3547623c11d8b2fe180fbeee4017c7dbe8')
+
+prepare() {
+	cd "$pkgname-$pkgver"
+	patch -Np1 -i ../rx-filename-traversal.patch
+}
+
+build() {
+	cd "$pkgname-$pkgver"
+	./configure --prefix=/usr
+	make
+}
+
+package() {
+	cd "$pkgname-$pkgver"
+	make DESTDIR="$pkgdir/" install
+}

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hamnews</title>
+<style>
+:root { --bg:#f6f7f9; --card:#fff; --fg:#1d2330; --mut:#687184; --line:#e2e5ea; --acc:#1f6feb; --ok:#1a7f37; --warn:#9a6700; --bad:#cf222e; }
+@media (prefers-color-scheme: dark) { :root { --bg:#0f1218; --card:#171b23; --fg:#e6e9ef; --mut:#8b93a5; --line:#2a303b; --acc:#58a6ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; } }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
+header { display:flex; align-items:center; gap:14px; padding:12px 18px; background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
+header h1 { font-size:17px; margin:0; letter-spacing:.2px; }
+.dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:6px; vertical-align:middle; }
+.mut { color:var(--mut); }
+main { display:grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.3fr); gap:14px; padding:14px 18px; max-width:1400px; margin:0 auto; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:14px; }
+.card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.6px; color:var(--mut); margin:0 0 8px; font-weight:600; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:5px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--mut); font-weight:600; font-size:12px; }
+td.n { text-align:right; font-variant-numeric: tabular-nums; }
+.bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:4px; }
+.bar > i { display:block; height:100%; background:var(--acc); }
+.msgs { max-height:340px; overflow:auto; }
+.msg { padding:7px 6px; border-bottom:1px solid var(--line); cursor:pointer; }
+.msg:hover, .msg.sel { background:color-mix(in srgb, var(--acc) 10%, transparent); }
+.msg .s { font-weight:600; }
+.msg .m { color:var(--mut); font-size:12px; }
+pre.body { white-space:pre-wrap; word-wrap:break-word; font:13px/1.45 ui-monospace, Menlo, Consolas, monospace; margin:8px 0 0; max-height:380px; overflow:auto; }
+label { display:block; font-size:12px; color:var(--mut); margin:8px 0 3px; }
+input, select, textarea { width:100%; font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:7px 8px; }
+textarea { min-height:140px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+button { font:inherit; border:0; border-radius:6px; padding:7px 14px; background:var(--acc); color:#fff; cursor:pointer; }
+button.sec { background:var(--line); color:var(--fg); }
+.row { display:flex; gap:8px; align-items:center; margin-top:10px; }
+.log { font:12px/1.4 ui-monospace, Menlo, Consolas, monospace; max-height:220px; overflow:auto; white-space:pre-wrap; color:var(--mut); }
+.pill { display:inline-block; padding:0 7px; border-radius:9px; font-size:12px; background:var(--line); margin:1px 2px 1px 0; }
+.ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>hamnews <span id="call" class="mut"></span></h1>
+  <span id="conn"></span>
+  <span id="summary" class="mut"></span>
+</header>
+<main>
+  <div>
+    <section class="card">
+      <h2>Stations heard</h2>
+      <table><thead><tr><th>Station</th><th class="n">Articles</th><th class="n">Needs from us</th><th class="n">We need</th><th>Hears</th></tr></thead>
+      <tbody id="peers"><tr><td colspan="5" class="mut">Listening&hellip;</td></tr></tbody></table>
+      <div class="mut" style="font-size:12px;margin-top:6px">Counts are from each station's last inventory beacon.</div>
+    </section>
+    <section class="card">
+      <h2>On the air</h2>
+      <div id="xfer" class="mut">Idle.</div>
+    </section>
+    <section class="card">
+      <h2>Activity</h2>
+      <div id="log" class="log"></div>
+    </section>
+  </div>
+  <div>
+    <section class="card">
+      <h2>Messages</h2>
+      <div id="msgs" class="msgs"><div class="mut">Loading&hellip;</div></div>
+    </section>
+    <section class="card" id="readcard" hidden>
+      <h2 id="rsubj"></h2>
+      <div id="rmeta" class="mut"></div>
+      <pre class="body" id="rbody"></pre>
+      <div class="row"><button class="sec" id="reply">Reply</button></div>
+    </section>
+    <section class="card">
+      <h2 id="ptitle">New message</h2>
+      <div class="mut" id="pfrom"></div>
+      <label for="pgroup">Group</label><select id="pgroup"></select>
+      <label for="psubj">Subject</label><input id="psubj" maxlength="200">
+      <label for="pbody">Message</label><textarea id="pbody"></textarea>
+      <div class="row"><button id="send">Post</button><button class="sec" id="clear">Clear</button><span id="pstat" class="mut"></span></div>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const el = (tag, attrs, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) { if (k === "class") e.className = v; else e.setAttribute(k, v); }
+  for (const k of kids) e.append(k instanceof Node ? k : document.createTextNode(String(k ?? "")));
+  return e;
+};
+const ago = t => { const s = (Date.now() - new Date(t)) / 1000; if (!(s >= 0)) return ""; if (s < 90) return Math.round(s) + "s ago"; if (s < 5400) return Math.round(s/60) + "m ago"; return Math.round(s/3600) + "h ago"; };
+const api = async (path, opts) => { const r = await fetch(path, opts); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j; };
+let refs = "", selected = "";
+
+async function status() {
+  let s;
+  try { s = await api("/api/status"); } catch (e) { $("conn").replaceChildren(el("span", {class:"bad"}, "hnlink not responding")); return; }
+  const L = s.link;
+  $("call").textContent = L ? L.call : "";
+  $("pfrom").textContent = "From: " + s.from;
+  $("conn").replaceChildren(s.connected
+    ? el("span", {}, el("span", {class:"dot", style:"background:var(--ok)"}), "TNC " + s.kiss)
+    : el("span", {}, el("span", {class:"dot", style:"background:var(--bad)"}), "TNC " + s.kiss + " not connected"));
+  if (L) {
+    $("summary").textContent = `${L.local_articles} articles here · ${L.peers.length} station(s) · sent ${L.stats.ObjectsSent} · received ${L.stats.ObjectsDecoded} batches, ${L.stats.Ingested.Accepted} new articles`;
+    const rows = L.peers.map(p => el("tr", {},
+      el("td", {}, el("b", {}, p.call), el("div", {class:"mut"}, ago(p.last_heard) + (p.hears_us ? "" : " · doesn't hear us yet"))),
+      el("td", {class:"n"}, p.articles),
+      el("td", {class:"n " + (p.they_lack ? "warn" : "")}, p.they_lack),
+      el("td", {class:"n " + (p.we_lack ? "warn" : "")}, p.we_lack),
+      el("td", {}, ...(p.heard || []).map(c => el("span", {class:"pill"}, c)))));
+    $("peers").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", {colspan:5, class:"mut"}, "No stations heard yet."))]));
+    const x = [];
+    if (L.sending) {
+      const o = L.sending;
+      x.push(el("div", {}, el("b", {}, "Sending "), `${o.have} article(s), ${o.bytes} bytes, ${o.k} blocks · round ${o.round}` + (o.need ? ` · fill requested: ${o.need}` : "")));
+    }
+    for (const o of L.receiving || []) {
+      const pct = o.k ? Math.min(100, 100 * o.have / o.k) : 0;
+      x.push(el("div", {style:"margin-top:8px"}, el("b", {}, "Receiving "), `from ${o.origin || "?"} · ${o.have}/${o.k || "?"} blocks`,
+        el("div", {class:"bar"}, el("i", {style:`width:${pct}%`}))));
+    }
+    if (L.queued_batches) x.push(el("div", {class:"mut"}, `${L.queued_batches} batch(es) queued`));
+    $("xfer").replaceChildren(...(x.length ? x : [el("span", {class:"mut"}, "Idle.")]));
+  }
+  const log = $("log"), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+  log.textContent = (s.events || []).slice(-150).join("\n");
+  if (atEnd) log.scrollTop = log.scrollHeight;
+}
+
+async function messages() {
+  let list;
+  try { list = await api("/api/articles"); } catch (e) { $("msgs").replaceChildren(el("div", {class:"bad"}, e.message)); return; }
+  const items = (list || []).map(a => {
+    const d = el("div", {class:"msg" + (a.message_id === selected ? " sel" : "")},
+      el("div", {class:"s"}, a.subject || "(no subject)"),
+      el("div", {class:"m"}, `${a.from} · ${a.group} · ${a.when && !a.when.startsWith("0001") ? new Date(a.when).toLocaleString() : a.date}`));
+    d.onclick = () => read(a.message_id);
+    return d;
+  });
+  $("msgs").replaceChildren(...(items.length ? items : [el("div", {class:"mut"}, "No messages yet.")]));
+}
+
+async function read(id) {
+  selected = id;
+  try {
+    const a = await api("/api/article?id=" + encodeURIComponent(id));
+    const h = a.headers;
+    $("rsubj").textContent = h.subject || "(no subject)";
+    $("rmeta").textContent = `${h.from || ""} · ${h.newsgroups || ""} · ${h.date || ""} · via ${(h.path || "").split("!").slice(0, -1).join(" ← ")}`;
+    $("rbody").textContent = a.body;
+    $("readcard").hidden = false;
+    $("reply").onclick = () => {
+      const g = (h.newsgroups || "").split(",")[0].trim();
+      if (g) $("pgroup").value = g;
+      $("psubj").value = /^re:/i.test(h.subject || "") ? h.subject : "Re: " + (h.subject || "");
+      $("pbody").value = (h.from || "someone") + " wrote:\n" + a.body.trimEnd().split("\n").map(l => "> " + l).join("\n") + "\n\n";
+      refs = ((h.references || "") + " " + (h["message-id"] || "")).trim();
+      $("ptitle").textContent = "Reply";
+      $("pbody").focus();
+    };
+    messages();
+  } catch (e) { $("rbody").textContent = e.message; $("readcard").hidden = false; }
+}
+
+async function groups() {
+  try {
+    const gs = await api("/api/groups");
+    $("pgroup").replaceChildren(...gs.map(g => el("option", {value:g}, g)));
+  } catch (e) { $("pstat").textContent = e.message; }
+}
+
+$("clear").onclick = () => { $("psubj").value = $("pbody").value = ""; refs = ""; $("ptitle").textContent = "New message"; $("pstat").textContent = ""; };
+$("send").onclick = async () => {
+  $("pstat").textContent = "Posting…";
+  try {
+    await api("/api/post", { method:"POST", headers:{"Content-Type":"application/json", "X-Hnlink":"1"},
+      body: JSON.stringify({Group:$("pgroup").value, Subject:$("psubj").value, Body:$("pbody").value, References:refs}) });
+    $("pstat").textContent = "Posted. It goes out with the next exchange.";
+    $("clear").onclick(); $("pstat").textContent = "Posted. It goes out with the next exchange.";
+    messages();
+  } catch (e) { $("pstat").replaceChildren(el("span", {class:"bad"}, e.message)); }
+};
+
+groups(); status(); messages();
+setInterval(status, 2000);
+setInterval(messages, 15000);
+</script>
+</body>
+</html>

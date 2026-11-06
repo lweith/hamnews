@@ -1,0 +1,61 @@
+From 02990c5e7424c91a1b209db90fada34d46818850 Mon Sep 17 00:00:00 2001
+From: David Runge <dvzrv@archlinux.org>
+Date: Wed, 15 Jul 2026 18:28:33 +0200
+Subject: [PATCH] Disable installing files using the owner and group we also
+ run as
+
+Signed-off-by: David Runge <dvzrv@archlinux.org>
+---
+ Makefile.global.in | 6 +++---
+ site/Makefile      | 8 ++++----
+ 2 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/Makefile.global.in b/Makefile.global.in
+index 8c164ce15..d11e542ca 100644
+--- a/Makefile.global.in
++++ b/Makefile.global.in
+@@ -280,8 +280,8 @@ INEWSMODE	= @INEWSMODE@
+ RNEWSMODE	= @RNEWSMODE@
+ FILEMODE	= @FILEMODE@
+ 
+-OWNER		= -o $(RUNASUSER) -g $(RUNASGROUP)
+-ROWNER		= -o $(RUNASUSER) -g $(RNEWSGROUP)
++OWNER		=
++ROWNER		=
+ 
+ INSTALL		= $(top)/support/install-sh -p
+ 
+@@ -308,7 +308,7 @@ INSTALL		= $(top)/support/install-sh -p
+ 
+ BACKUP_OPTION	= -S .OLD
+ 
+-LI_SPRI		= $(LIBTOOLINST) $(INSTALL) -o root -g $(RUNASGROUP) -m 4550 $(BACKUP_OPTION)
++LI_SPRI		= $(LIBTOOLINST) $(INSTALL) -o root -g root -m 4550 $(BACKUP_OPTION)
+ LI_XPRI		= $(LIBTOOLINST) $(INSTALL) $(OWNER) -m 0550 $(BACKUP_OPTION)
+ LI_XPUB		= $(LIBTOOLINST) $(INSTALL) $(OWNER) -m 0555 $(BACKUP_OPTION)
+ LI_LPUB		= $(LIBTOOLINST) $(INSTALL) $(OWNER) -m 0555
+diff --git a/site/Makefile b/site/Makefile
+index 6cb0727ec..99cb483cc 100644
+--- a/site/Makefile
++++ b/site/Makefile
+@@ -146,16 +146,16 @@ $D$(PATH_ACTIVE_TIMES):
+ 	touch $@
+ 	@ME=`$(WHOAMI)` ; \
+ 	if [ x"$$ME" = xroot ] ; then \
+-	    chown $(RUNASUSER) $@ ; \
+-	    chgrp $(RUNASGROUP) $@ ; \
++	    chown root $@ ; \
++	    chgrp root $@ ; \
+ 	fi
+ 	chmod $(FILEMODE) $@
+ $D$(PATH_HISTORY):
+ 	touch $@
+ 	@ME=`$(WHOAMI)` ; \
+ 	if [ x"$$ME" = xroot ] ; then \
+-	    chown $(RUNASUSER) $@ ; \
+-	    chgrp $(RUNASGROUP) $@ ; \
++	    chown root $@ ; \
++	    chgrp root $@ ; \
+ 	fi
+ 	chmod $(FILEMODE) $@
+ 	@ME=`$(WHOAMI)` ; \

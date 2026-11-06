@@ -1,0 +1,14 @@
+Template: hamnews/callsign
+Type: string
+Description: Your callsign:
+ It becomes this news server's name: the Path: entry on every article it
+ handles and the domain of its Message-IDs, so it must be unique on the net.
+ Bare callsign, no SSID (e.g. kn6fln); it is stored in lowercase.
+ .
+ Leave it empty to set pathhost and domain in /etc/hamnews/inn.conf by hand;
+ hamnews will not start until they are set.
+
+Template: hamnews/callsign-invalid
+Type: error
+Description: "${call}" is not a callsign
+ Use letters and digits only, with no SSID or other punctuation.

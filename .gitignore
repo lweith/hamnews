@@ -1,0 +1,14 @@
+# build outputs
+/dist/
+/packaging/work/
+/hnlink/hnlink
+/hnlink/hnlink.exe
+/hnlink/itsjustnews
+/hnlink/itsjustnews.exe
+
+# upstream tarball: fetched from ftp.isc.org and checked against the .asc
+/packaging/upstream/*.tar.gz
+
+# local scratch from the pre-package build
+/inn-2.7.4/
+/*.log

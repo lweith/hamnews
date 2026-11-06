@@ -1,0 +1,3 @@
+# Accept everything locally. Outbound goes by hnlink (radio net) or by
+# hnlink batch (FLAMP), never by feeds.
+ME:*::

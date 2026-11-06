@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = purge ]; then
+    rm -f /etc/hamnews/inn.conf
+    rmdir /etc/hamnews 2>/dev/null || true
+    # Purge means everything, including the articles.
+    rm -rf /var/lib/hamnews /var/spool/hamnews /var/log/hamnews /run/hamnews
+fi
+
+#DEBHELPER#
+
+exit 0

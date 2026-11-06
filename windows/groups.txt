@@ -1,0 +1,4 @@
+# Newsgroups every station on the net creates. Must be identical at every
+# station: a station without a group refuses that traffic and does not relay it.
+# One group per line; edit for your net before running install.sh.
+ham.test

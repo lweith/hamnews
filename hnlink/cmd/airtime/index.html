@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>airtime</title>
+<style>
+body { font: 14px/1.4 system-ui, sans-serif; margin: 1.5em; color: #222; }
+h1 { font-size: 1.3em; margin: 0 0 .2em; }
+.sub { color: #666; margin-bottom: 1em; }
+table { border-collapse: collapse; margin: .5em 0 1.5em; }
+th, td { padding: .25em .7em; text-align: right; border-bottom: 1px solid #eee; }
+th { background: #f5f5f5; font-weight: 600; }
+td.l, th.l { text-align: left; }
+.tx { background: #fff7e6; }
+.bar { display: inline-block; height: .7em; background: #4a7; vertical-align: middle; }
+.down { color: #b00; font-weight: 600; }
+code { font-size: .95em; }
+</style>
+</head>
+<body>
+<h1>airtime</h1>
+<div class="sub" id="sub">loading…</div>
+<h2>Channels</h2>
+<table id="ch"><thead><tr><th class="l">port</th><th class="l">name</th><th>stations</th><th>busy 1 min</th><th>5 min</th><th>15 min</th></tr></thead><tbody></tbody></table>
+<h2>Stations</h2>
+<table id="st"><thead><tr><th>port</th><th class="l">call-SSID</th><th class="l">dir</th><th>frames</th><th>bytes</th><th>airtime</th><th class="l">types</th><th class="l">PIDs</th><th class="l">top destinations</th><th>via digi</th><th class="l">last heard</th></tr></thead><tbody></tbody></table>
+<div class="sub">Airtime is estimated from frame length, bit rate and one key-up per burst. <code>tx</code> rows (shaded) are this station.
+Data: <a href="api/stats">api/stats</a> · <a href="metrics">metrics</a></div>
+<script>
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pct = x => (100 * (x || 0)).toFixed(1) + '%';
+const top = (m, n) => Object.entries(m || {}).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => esc(k) + ' ' + v).join(', ');
+const ago = t => { const s = Math.round((Date.now() - Date.parse(t)) / 1000); return s < 90 ? s + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; };
+const dur = s => s < 120 ? s.toFixed(1) + ' s' : (s / 60).toFixed(1) + ' min';
+async function tick() {
+  try {
+    const d = await (await fetch('api/stats')).json();
+    document.getElementById('sub').innerHTML = (d.agw_connected ? 'connected to direwolf' : '<span class="down">not connected to direwolf</span>') +
+      ' · watching since ' + new Date(d.since).toLocaleString() + ' · ' + d.bitrate + ' bit/s';
+    document.querySelector('#ch tbody').innerHTML = (d.channels || []).map(c =>
+      `<tr><td class="l">${c.port}</td><td class="l">${esc(c.name || '')}</td><td>${c.calls}</td>` +
+      ['1m', '5m', '15m'].map(w => `<td><span class="bar" style="width:${Math.round(100 * (c.busy[w] || 0))}px"></span> ${pct(c.busy[w])}</td>`).join('') + '</tr>').join('');
+    document.querySelector('#st tbody').innerHTML = (d.stations || []).map(r =>
+      `<tr class="${r.dir}"><td>${r.port}</td><td class="l">${esc(r.call)}</td><td class="l">${r.dir}</td><td>${r.frames}</td><td>${r.bytes}</td>` +
+      `<td>${dur(r.airtime_s)}</td><td class="l">${top(r.types, 6)}</td><td class="l">${top(r.pids, 3)}</td><td class="l">${top(r.dests, 3)}</td><td>${r.via}</td><td class="l">${ago(r.last)}</td></tr>`).join('');
+  } catch (e) {
+    document.getElementById('sub').innerHTML = '<span class="down">airtime not answering</span>';
+  }
+}
+tick(); setInterval(tick, 5000);
+</script>
+</body>
+</html>

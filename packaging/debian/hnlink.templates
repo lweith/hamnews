@@ -1,0 +1,18 @@
+Template: hnlink/call
+Type: string
+Description: Callsign and SSID for hnlink:
+ hnlink transmits under this AX.25 address. Use an SSID that nothing else on
+ the TNC uses (Winlink, APRS), e.g. KN6FLN-5.
+ .
+ Leave it empty to set CALL in /etc/hnlink.conf later; hnlink does not run
+ until it is set.
+
+Template: hnlink/from
+Type: string
+Description: From: line for posts made on the hnlink status page:
+ For example: KN6FLN <you@example.com>. Empty means the bare callsign.
+
+Template: hnlink/call-invalid
+Type: error
+Description: "${call}" is not a callsign-SSID
+ Use the form CALL or CALL-N with N from 0 to 15, e.g. KN6FLN-5.

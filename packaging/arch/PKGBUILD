@@ -1,0 +1,134 @@
+# Maintainer: KN6FLN <lweith@gmail.com>
+#
+# hamnews: a minimal INN news server for ham-radio usenet, in its own namespace
+#          (/etc/hamnews, /usr/lib/hamnews, /var/{lib,spool,log}/hamnews) so it
+#          coexists with the distro 'inn' package.
+# hnlink:  automatic exchange over a local radio net (KISS/direwolf) and FLAMP
+#          batch tools.
+# itsjustnews: receive-only monitor; decodes hnlink traffic to plain text.
+# airtime: channel use by callsign-SSID from direwolf (page, Prometheus, pcap).
+
+pkgbase=hamnews
+pkgname=(hamnews hnlink itsjustnews airtime)
+pkgver=0.1
+_innver=2.7.4
+pkgrel=1
+arch=(x86_64 aarch64 armv7h)
+license=(ISC)
+makedepends=(go)
+source=("https://ftp.isc.org/isc/inn/inn-$_innver.tar.gz"{,.asc}
+        inn-2.7.4-disable-installing-files-using-the-owner-and-group-we-also-run-as.patch
+        "hnlink-$pkgver.tar.gz"
+        inn.conf storage.conf newsfeeds incoming.conf readers.conf expire.ctl groups
+        hamnews-prestart hamnews-sync-groups hamnews.service hamnews.tmpfiles hamnews.sysusers
+        hnlink.conf hnlink.service airtime.conf airtime.service
+        OPERATIONS.md)
+validpgpkeys=('E784364E8DDE7BB370FBD9EAD15D313882004173')  # Russ Allbery (INN releases)
+sha256sums=()
+
+prepare() {
+  cd inn-$_innver
+  patch -Np1 -i ../inn-2.7.4-disable-installing-files-using-the-owner-and-group-we-also-run-as.patch
+}
+
+build() {
+  cd inn-$_innver
+  CFLAGS+=' -fcommon'
+  ./configure --prefix=/usr/lib/hamnews \
+    --sysconfdir=/etc/hamnews \
+    --with-db-dir=/var/lib/hamnews \
+    --with-spool-dir=/var/spool/hamnews \
+    --with-log-dir=/var/log/hamnews \
+    --with-run-dir=/run/hamnews \
+    --with-tmp-dir=/var/spool/hamnews/tmp \
+    --without-perl --without-python --without-openssl --without-sasl \
+    --without-krb5 --without-bdb --without-zlib --without-sqlite3 \
+    --with-sendmail=/bin/true \
+    --with-news-user=news --with-news-group=news --with-news-master=news
+  make
+
+  cd "$srcdir/hnlink"
+  export CGO_ENABLED=0 GOPATH="$srcdir/gopath" GOFLAGS='-mod=vendor -trimpath'
+  go build -ldflags='-s -w' -o hnlink .
+  go build -ldflags='-s -w' -o itsjustnews ./cmd/itsjustnews
+  go build -ldflags='-s -w' -o airtime ./cmd/airtime
+}
+
+check() {
+  cd hnlink
+  export CGO_ENABLED=0 GOPATH="$srcdir/gopath" GOFLAGS='-mod=vendor -trimpath'
+  go test ./internal/wire ./internal/fec ./internal/kiss ./cmd/itsjustnews ./cmd/airtime
+}
+
+package_hamnews() {
+  pkgdesc='Minimal INN news server for ham-radio usenet (rnews, FLAMP, hnlink)'
+  depends=(glibc gcc-libs systemd-libs)
+  optdepends=('hnlink: automatic exchange over a local radio net'
+              'tin: console newsreader')
+  install=hamnews.install
+  backup=()   # set at the end of this function: everything in /etc/hamnews
+
+  cd inn-$_innver
+  make DESTDIR="$pkgdir" install
+
+  # Variable data is created at first start (hamnews-prestart) and by tmpfiles.d.
+  install -d "$pkgdir/usr/share/hamnews"
+  install -m644 "$pkgdir/var/lib/hamnews/active" "$pkgdir/var/lib/hamnews/newsgroups" \
+    "$pkgdir/usr/share/hamnews/"
+  rm -rf "$pkgdir/var" "$pkgdir/run"
+
+  # No development files.
+  rm -rf "$pkgdir/usr/lib/hamnews/include"
+  rm -f "$pkgdir"/usr/lib/hamnews/lib/*.{a,la}
+
+  install -d "$pkgdir/usr/share/doc"
+  mv "$pkgdir/usr/lib/hamnews/doc" "$pkgdir/usr/share/doc/hamnews"
+  install -m644 "$srcdir/OPERATIONS.md" "$pkgdir/usr/share/doc/hamnews/"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/hamnews/LICENSE"
+
+  find "$pkgdir/usr/lib/hamnews/bin" -type f -exec chmod 0755 {} +
+
+  cd "$srcdir"
+  for f in inn.conf storage.conf newsfeeds incoming.conf readers.conf expire.ctl groups; do
+    install -m644 "$f" "$pkgdir/etc/hamnews/$f"
+  done
+  install -m755 hamnews-prestart hamnews-sync-groups "$pkgdir/usr/lib/hamnews/"
+  install -Dm644 hamnews.service "$pkgdir/usr/lib/systemd/system/hamnews.service"
+  install -Dm644 hamnews.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/hamnews.conf"
+  install -Dm644 hamnews.sysusers "$pkgdir/usr/lib/sysusers.d/hamnews.conf"
+
+  # Every file in /etc/hamnews is configuration: keep local edits on upgrade.
+  backup=($(cd "$pkgdir" && find etc/hamnews -type f | sort))
+}
+
+package_hnlink() {
+  pkgdesc='Broadcast usenet exchange over a local amateur radio net (KISS/direwolf), plus FLAMP batch tools'
+  depends=()
+  optdepends=('direwolf: soundcard modem/TNC'
+              'hamnews: local news server')
+  install=hnlink.install
+  backup=(etc/hnlink.conf)
+
+  install -Dm755 hnlink/hnlink "$pkgdir/usr/bin/hnlink"
+  install -Dm644 hnlink.service "$pkgdir/usr/lib/systemd/system/hnlink.service"
+  install -Dm644 hnlink.conf "$pkgdir/etc/hnlink.conf"
+  install -Dm644 -t "$pkgdir/usr/share/doc/hnlink" hnlink/README.md hnlink/PROTOCOL.md
+}
+
+package_itsjustnews() {
+  pkgdesc='Receive-only monitor that decodes hnlink radio traffic to plain text'
+  depends=()
+  optdepends=('direwolf: soundcard modem/TNC')
+  install -Dm755 hnlink/itsjustnews "$pkgdir/usr/bin/itsjustnews"
+}
+
+package_airtime() {
+  pkgdesc='Channel use by callsign-SSID from direwolf: page, Prometheus metrics, pcap trace'
+  depends=()
+  optdepends=('direwolf: soundcard modem/TNC')
+  backup=(etc/airtime.conf)
+  install -Dm755 hnlink/airtime "$pkgdir/usr/bin/airtime"
+  install -Dm644 airtime.service "$pkgdir/usr/lib/systemd/system/airtime.service"
+  install -Dm644 airtime.conf "$pkgdir/etc/airtime.conf"
+  install -Dm644 hnlink/cmd/airtime/README.md "$pkgdir/usr/share/doc/airtime/README.md"
+}

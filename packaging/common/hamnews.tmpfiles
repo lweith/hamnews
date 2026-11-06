@@ -1,0 +1,20 @@
+# hamnews directories and permissions
+d /var/lib/hamnews 0750 news news -
+d /var/log/hamnews 0750 news news -
+d /var/log/hamnews/OLD 0755 news news -
+d /var/spool/hamnews 0755 news news -
+d /var/spool/hamnews/archive 0755 news news -
+d /var/spool/hamnews/articles 0755 news news -
+d /var/spool/hamnews/incoming 0755 news news -
+d /var/spool/hamnews/incoming/bad 0755 news news -
+d /var/spool/hamnews/innfeed 0755 news news -
+d /var/spool/hamnews/outgoing 0755 news news -
+d /var/spool/hamnews/overview 0755 news news -
+d /var/spool/hamnews/tmp 0755 news news -
+z /etc/hamnews/incoming.conf 0640 root news -
+z /etc/hamnews/inn-secrets.conf 0640 root news -
+z /etc/hamnews/passwd.nntp 0640 root news -
+z /etc/hamnews/inn-radius.conf 0640 root news -
+z /etc/hamnews/innfeed.conf 0640 root news -
+# innd binds port 119 through innbind; only news may run it.
+z /usr/lib/hamnews/bin/innbind 4750 root news -

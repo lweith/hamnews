@@ -1,0 +1,11 @@
+post_install() {
+  cat <<EOF
+==> hnlink: set CALL (callsign-SSID) in /etc/hnlink.conf, configure direwolf,
+    then: systemctl enable --now hnlink
+    Status page: http://localhost:8073   Docs: /usr/share/doc/hnlink/
+EOF
+}
+
+post_upgrade() {
+  systemctl try-restart hnlink.service >/dev/null 2>&1 || true
+}

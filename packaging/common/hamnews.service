@@ -1,0 +1,22 @@
+[Unit]
+Description=hamnews news server (INN for ham-radio usenet)
+Documentation=file:///usr/share/doc/hamnews/OPERATIONS.md man:inn.conf(5)
+After=network.target
+Conflicts=innd.service inn2.service
+
+[Service]
+Type=simple
+User=news
+Group=news
+RuntimeDirectory=hamnews
+RuntimeDirectoryPreserve=restart
+ExecCondition=/usr/lib/hamnews/hamnews-prestart check
+ExecStartPre=+/usr/lib/hamnews/hamnews-prestart
+ExecStart=/usr/lib/hamnews/bin/innd -f
+ExecStartPost=/usr/lib/hamnews/hamnews-sync-groups
+ExecStop=/usr/lib/hamnews/bin/ctlinnd -t 30 shutdown systemd
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

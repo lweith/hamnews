@@ -1,0 +1,16 @@
+post_install() {
+  cat <<EOF
+==> hamnews: set pathhost and domain in /etc/hamnews/inn.conf to your callsign,
+    list the net's groups in /etc/hamnews/groups, then:
+      systemctl enable --now hamnews
+    Read with any newsreader at localhost:119. Guide: /usr/share/doc/hamnews/OPERATIONS.md
+EOF
+}
+
+post_upgrade() {
+  # The pacman tmpfiles hook runs after this scriptlet; pacman has just reset
+  # innbind to its packaged mode, and innd can't bind port 119 without setuid.
+  systemd-sysusers hamnews.conf >/dev/null 2>&1 || true
+  systemd-tmpfiles --create hamnews.conf >/dev/null 2>&1 || true
+  systemctl try-restart hamnews.service >/dev/null 2>&1 || true
+}

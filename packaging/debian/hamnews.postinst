@@ -1,0 +1,38 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+
+CONF=/etc/hamnews/inn.conf
+
+case "$1" in
+configure)
+    # The news user (Debian's base-passwd already has it) and the directories,
+    # including innbind's setuid bit, which dpkg doesn't carry.
+    systemd-sysusers hamnews.conf
+    systemd-tmpfiles --create hamnews.conf
+
+    [ -e "$CONF" ] || install -m644 /usr/share/hamnews/inn.conf.dist "$CONF"
+
+    db_get hamnews/callsign
+    call=$(printf '%s' "$RET" | tr 'A-Z' 'a-z')
+    cur=$(sed -n 's/^pathhost:[[:space:]]*\([^[:space:]]*\).*/\1/p' "$CONF" | head -n1)
+    # Only when the answer changed: a hand-set domain survives upgrades.
+    case "$call" in
+        ""|*[!a-z0-9]*|"$cur") ;;
+        *)
+            sed -i -e "s/^pathhost:\([[:space:]]*\)[^[:space:]]*/pathhost:\1$call/" \
+                   -e "s/^domain:\([[:space:]]*\)[^[:space:]]*/domain:\1$call/" "$CONF"
+            ;;
+    esac
+    if grep -Eq '^(pathhost|domain):[[:space:]]*CHANGEME' "$CONF"; then
+        echo "hamnews: set pathhost and domain in $CONF (or: dpkg-reconfigure hamnews)," >&2
+        echo "hamnews: then: systemctl restart hamnews" >&2
+    fi
+    ;;
+esac
+
+db_stop
+
+#DEBHELPER#
+
+exit 0

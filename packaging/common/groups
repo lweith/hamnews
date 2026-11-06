@@ -1,0 +1,7 @@
+# The net's newsgroups, one per line: NAME [FLAG]. FLAG is y (posting allowed,
+# the default) or n. Every station on the net must list the same groups: a
+# station without a group refuses and does not relay its articles.
+# Missing groups are created whenever hamnews starts (systemctl restart hamnews);
+# groups are never removed from here. Remove one by hand:
+#   ctlinnd rmgroup NAME   (as news: sudo -u news /usr/lib/hamnews/bin/ctlinnd ...)
+ham.test

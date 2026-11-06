@@ -1,0 +1,52 @@
+Source: hamnews
+Section: news
+Priority: optional
+Maintainer: KN6FLN <lweith@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: hamnews
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, systemd
+Suggests: hnlink, tin
+Description: minimal INN news server for ham-radio usenet
+ A stripped INN 2.7 in its own namespace (/etc/hamnews, /usr/lib/hamnews,
+ /var/lib/hamnews, /var/spool/hamnews) so it coexists with inn2. It holds the
+ ham.* groups that hnlink exchanges over a local radio net, and that FLAMP
+ batches carry between nets. Read and post with any newsreader at
+ localhost:119.
+
+Package: hnlink
+Architecture: any
+Depends: ${misc:Depends}, systemd
+Recommends: direwolf
+Suggests: hamnews
+Description: broadcast usenet exchange over a local amateur radio net
+ hnlink keeps the news servers on a radio net in sync. Stations announce what
+ they hold; missing articles go out once as Reed-Solomon coded AX.25 UI frames
+ through direwolf (KISS TCP) and every station that hears them decodes them,
+ relaying across simplex hops. Includes a local status and posting page, and
+ 'hnlink batch'/'hnlink load' for moving rnews batches over FLAMP.
+
+Package: itsjustnews
+Architecture: any
+Depends: ${misc:Depends}
+Recommends: direwolf
+Description: receive-only monitor that decodes hnlink traffic to plain text
+ For anyone checking that hnlink stations send plain usenet and nothing that
+ obscures meaning (47 CFR 97.113(a)(4)). It listens to direwolf's KISS port
+ or a KISS capture file, explains every hnlink frame, reassembles the
+ Reed-Solomon coded objects and prints every article in full. It has no
+ transmit path.
+
+Package: airtime
+Architecture: any
+Depends: ${misc:Depends}, systemd
+Recommends: direwolf
+Description: channel use by callsign-SSID, from direwolf
+ A receive-only AGW client of direwolf. It counts frames, bytes and estimated
+ airtime per radio channel, callsign-SSID and direction (including this
+ station's own transmissions, which KISS clients never see), with frame types,
+ PIDs and channel occupancy. It serves a page, JSON and Prometheus metrics,
+ and can write a pcap packet trace for Wireshark.

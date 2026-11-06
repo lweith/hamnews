@@ -1,0 +1,19 @@
+#!/bin/sh
+# hamnews.service ExecStartPost (as news): create every group in
+# /etc/hamnews/groups that the server doesn't have. Never removes groups.
+set -eu
+B=/usr/lib/hamnews/bin
+i=0
+until "$B/ctlinnd" -t 2 mode >/dev/null 2>&1; do
+    i=$((i + 1))
+    # innd already exited (e.g. couldn't bind): don't hold the unit in "activating".
+    if [ -n "${MAINPID:-}" ] && ! kill -0 "$MAINPID" 2>/dev/null; then exit 0; fi
+    [ $i -lt 30 ] || { echo "hamnews: innd not answering; groups not synced" >&2; exit 0; }
+    sleep 1
+done
+host=$("$B/innconfval" pathhost)
+sed -e 's/#.*//' /etc/hamnews/groups | while read -r g flag _; do
+    [ -n "$g" ] || continue
+    grep -q "^$g " /var/lib/hamnews/active && continue
+    "$B/ctlinnd" newgroup "$g" "${flag:-y}" "$host" >/dev/null && echo "hamnews: created group $g"
+done
