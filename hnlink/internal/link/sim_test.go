@@ -23,6 +23,7 @@ type hub struct {
 	loss  float64
 	rng   *rand.Rand
 	heard time.Time
+	drop  func(from string, f []byte) bool // optional: lose a transmission entirely
 }
 
 type port struct {
@@ -45,6 +46,9 @@ func (p *port) Send(f []byte) error {
 	h := p.h
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.drop != nil && h.drop(p.call, f) {
+		return nil
+	}
 	for _, q := range h.ports {
 		if q == p || (h.link != nil && !h.link(p.call, q.call)) || h.rng.Float64() < h.loss {
 			continue
@@ -142,6 +146,7 @@ func fastCfg(call string, verbose bool) Config {
 	c.InvEvery, c.InvDebounce, c.RefreshEvery = 400*time.Millisecond, 30*time.Millisecond, 100*time.Millisecond
 	c.PeerTTL, c.ResendHold = 10*time.Second, 1500*time.Millisecond
 	c.Listen, c.NeedSpread = 60*time.Millisecond, 40*time.Millisecond
+	c.NeedIdle = 300 * time.Millisecond
 	c.MaxObject = 16 << 10
 	if verbose {
 		c.Logger = log.New(os.Stderr, call+" ", log.Lmicroseconds)

@@ -67,6 +67,14 @@ type Config struct {
 	PeerTTL      time.Duration // forget a peer not heard this long
 	ResendHold   time.Duration // don't send (or relay) the same article again this soon
 
+	// A beacon that nobody answers may have been lost (a repeater's CW ID,
+	// a collision). While a live peer's inventory still differs from ours and
+	// nothing has been heard since, beacon again after BeaconRetry, up to
+	// BeaconRetries times.
+	BeaconRetry   time.Duration
+	BeaconRetries int
+
+	NeedIdle   time.Duration // receiver: NEED after this long with no new symbol, even without an END
 	Listen     time.Duration // wait for NEED after END (after the END is on the air)
 	NeedSpread time.Duration // receivers pick a NEED delay in [0, NeedSpread)
 	MaxRounds  int           // fill rounds per object
@@ -83,7 +91,8 @@ func Defaults(call string) Config {
 		Bitrate: 1200, TxDelay: 300 * time.Millisecond, Burst: 6, Quiet: 3 * time.Second,
 		InvEvery: 30 * time.Minute, InvDebounce: 20 * time.Second, RefreshEvery: 2 * time.Minute,
 		PeerTTL: 2 * time.Hour, ResendHold: time.Hour,
-		Listen: 10 * time.Second, NeedSpread: 6 * time.Second, MaxRounds: 4, Overhead: 0.15,
+		BeaconRetry: 3 * time.Minute, BeaconRetries: 2,
+		Listen: 10 * time.Second, NeedSpread: 6 * time.Second, NeedIdle: 45 * time.Second, MaxRounds: 4, Overhead: 0.15,
 		MaxObject: 48 << 10,
 	}
 }
@@ -104,16 +113,19 @@ type rxObj struct {
 	dec       *fec.Decoder
 	last      time.Time
 	needTimer *time.Timer
+	idle      *time.Timer // NEED if no symbol arrives for NeedIdle
+	ended     bool        // the sender's END was heard
 	heardNeed int
 }
 
 type txObj struct {
-	enc     *fec.Encoded
-	next    int // next repair ESI to send
-	round   int
-	maxNeed int
-	listen  bool
-	hashes  []wire.AHash
+	enc      *fec.Encoded
+	next     int // next repair ESI to send
+	round    int
+	maxNeed  int
+	listen   bool
+	hashes   []wire.AHash
+	finished time.Time // when the object was completed; kept to answer late NEEDs
 }
 
 type Engine struct {
@@ -126,20 +138,24 @@ type Engine struct {
 	txq  chan txJob
 	quit chan struct{}
 
-	local    map[wire.AHash]string // hash -> message-id
-	ingested map[wire.AHash]ingest // radio arrivals not yet visible via NEWNEWS
-	gen      uint16
-	invTimer *time.Timer
-	peers    map[string]*peer
-	heard    map[string]time.Time // any valid frame, by sender
-	nbrSig   string               // heard set as last beaconed
-	rx       map[wire.ObjID]*rxObj
-	done     map[wire.ObjID]time.Time
-	tx       *txObj
-	txQueue  [][]string // message-id groups waiting to be sent
-	sentAt   map[wire.AHash]time.Time
-	elect    *time.Timer
-	rng      *rand.Rand
+	local       map[wire.AHash]string // hash -> message-id
+	ingested    map[wire.AHash]ingest // radio arrivals not yet visible via NEWNEWS
+	gen         uint16
+	invTimer    *time.Timer
+	beaconAt    time.Time // when the last beacon finished transmitting
+	beaconTries int       // retries sent since the last scheduled beacon
+	retryTimer  *time.Timer
+	peers       map[string]*peer
+	heard       map[string]time.Time // any valid frame, by sender
+	nbrSig      string               // heard set as last beaconed
+	rx          map[wire.ObjID]*rxObj
+	served      map[wire.ObjID]*txObj // completed objects, kept for late NEEDs
+	done        map[wire.ObjID]time.Time
+	tx          *txObj
+	txQueue     [][]string // message-id groups waiting to be sent
+	sentAt      map[wire.AHash]time.Time
+	elect       *time.Timer
+	rng         *rand.Rand
 
 	Stats Stats
 }
@@ -171,7 +187,7 @@ func New(cfg Config, tr Transport, st Store) *Engine {
 	return &Engine{cfg: cfg, tr: tr, st: st, lg: lg,
 		ev: make(chan func(), 256), txq: make(chan txJob, 64), quit: make(chan struct{}),
 		local: map[wire.AHash]string{}, ingested: map[wire.AHash]ingest{}, peers: map[string]*peer{}, heard: map[string]time.Time{},
-		rx: map[wire.ObjID]*rxObj{}, done: map[wire.ObjID]time.Time{}, sentAt: map[wire.AHash]time.Time{},
+		rx: map[wire.ObjID]*rxObj{}, served: map[wire.ObjID]*txObj{}, done: map[wire.ObjID]time.Time{}, sentAt: map[wire.AHash]time.Time{},
 		rng: rand.New(rand.NewSource(time.Now().UnixNano() ^ int64(len(cfg.Call))))}
 }
 
@@ -426,7 +442,72 @@ func (e *Engine) invFrames() [][]byte {
 func (e *Engine) sendInv() {
 	f := e.invFrames()
 	e.lg.Printf("INV gen %d: %d articles in %d frame(s)", e.gen, len(e.local), len(f))
-	e.queue(f, nil)
+	e.stopRetry()
+	e.beaconTries = 0
+	e.queueBeacon(f)
+}
+
+// queueBeacon sends a beacon and, once it is on the air, arms the retry.
+func (e *Engine) queueBeacon(f [][]byte) {
+	e.queue(f, func() {
+		e.beaconAt = time.Now()
+		e.armRetry()
+	})
+}
+
+func (e *Engine) stopRetry() {
+	if e.retryTimer != nil {
+		e.retryTimer.Stop()
+		e.retryTimer = nil
+	}
+}
+
+func (e *Engine) armRetry() {
+	e.stopRetry()
+	if e.cfg.BeaconRetries <= 0 || e.beaconTries >= e.cfg.BeaconRetries {
+		return
+	}
+	e.retryTimer = e.after(e.jitter(e.cfg.BeaconRetry), e.retryInv)
+}
+
+// retryInv beacons again if the beacon seems to have gone unanswered.
+func (e *Engine) retryInv() {
+	e.retryTimer = nil
+	if !e.unresolved() || e.heardSince(e.beaconAt) {
+		return
+	}
+	e.beaconTries++
+	e.lg.Printf("no answer to INV gen %d; beaconing again (%d of %d)", e.gen, e.beaconTries, e.cfg.BeaconRetries)
+	e.queueBeacon(e.invFrames())
+}
+
+// unresolved reports whether a live peer holds articles we lack, or lacks
+// articles we hold: the case where an answer is owed.
+func (e *Engine) unresolved() bool {
+	for _, p := range e.peers {
+		if !p.have || time.Since(p.seen) >= e.cfg.PeerTTL {
+			continue
+		}
+		if len(p.inv) != len(e.local) {
+			return true
+		}
+		for h := range e.local {
+			if !p.inv[h] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// heardSince reports whether any station was heard after t.
+func (e *Engine) heardSince(t time.Time) bool {
+	for _, h := range e.heard {
+		if h.After(t) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) onInv(from string, v *wire.Inv) {
@@ -654,6 +735,8 @@ func (e *Engine) endRound(id wire.ObjID) {
 	}
 	e.done[id] = now // late copies of our own object (relays, other senders) are not ours to decode
 	e.Stats.ObjectsSent++
+	t.finished = now
+	e.served[id] = t // answers NEEDs from receivers that missed the END, for ResendHold
 	e.tx = nil
 	e.nextObject()
 }
@@ -711,10 +794,16 @@ func (e *Engine) onManifest(m *wire.Manifest) {
 	if e.tryDecode(m.ID, r) {
 		return
 	}
-	if m.Flags&wire.FlagEnd != 0 && r.needTimer == nil {
-		r.heardNeed = 0
-		r.needTimer = e.after(time.Duration(e.rng.Int63n(int64(e.cfg.NeedSpread)+1)), func() { e.fireNeed(m.ID) })
+	if m.Flags&wire.FlagEnd != 0 {
+		r.ended = true
+		stopTimer(&r.idle)
+		if r.needTimer == nil {
+			r.heardNeed = 0
+			r.needTimer = e.after(time.Duration(e.rng.Int63n(int64(e.cfg.NeedSpread)+1)), func() { e.fireNeed(m.ID) })
+		}
+		return
 	}
+	e.armIdle(m.ID, r)
 }
 
 func (e *Engine) onSymbol(s *wire.Symbol) {
@@ -723,7 +812,37 @@ func (e *Engine) onSymbol(s *wire.Symbol) {
 		return
 	}
 	if r.dec.Add(s) {
-		e.tryDecode(s.ID, r)
+		if e.tryDecode(s.ID, r) {
+			return
+		}
+	}
+	if !r.ended {
+		e.armIdle(s.ID, r)
+	}
+}
+
+// armIdle restarts the receiver's idle timer. The END can be lost (both copies
+// of it), which would leave the receiver waiting forever for a NEED to be
+// prompted, so a stalled object asks for what it lacks anyway.
+func (e *Engine) armIdle(id wire.ObjID, r *rxObj) {
+	stopTimer(&r.idle)
+	r.idle = e.after(e.cfg.NeedIdle, func() { e.idleNeed(id) })
+}
+
+func (e *Engine) idleNeed(id wire.ObjID) {
+	r := e.rx[id]
+	if r == nil || r.ended {
+		return
+	}
+	r.idle = nil
+	e.fireNeed(id)
+	e.armIdle(id, r)
+}
+
+func stopTimer(t **time.Timer) {
+	if *t != nil {
+		(*t).Stop()
+		*t = nil
 	}
 }
 
@@ -751,6 +870,16 @@ func (e *Engine) onNeed(n *wire.Need) {
 		t.maxNeed = max(t.maxNeed, int(n.Count))
 		return
 	}
+	// A receiver is still short of an object we already finished, which means
+	// its END was lost. Repair it, unless we are busy with something else (it
+	// will ask again).
+	if t := e.served[n.ID]; t != nil && e.tx == nil {
+		e.tx = t
+		t.maxNeed, t.listen, t.round = int(n.Count), false, 0
+		e.lg.Printf("object %s: NEED %d after completion; repairing", n.ID, n.Count)
+		e.sendRound(int(math.Ceil(float64(n.Count)*1.25))+1, false)
+		return
+	}
 	if r := e.rx[n.ID]; r != nil {
 		r.heardNeed = max(r.heardNeed, int(n.Count))
 	}
@@ -768,6 +897,7 @@ func (e *Engine) tryDecode(id wire.ObjID, r *rxObj) bool {
 	if r.needTimer != nil {
 		r.needTimer.Stop()
 	}
+	stopTimer(&r.idle)
 	delete(e.rx, id)
 	now := time.Now()
 	e.done[id] = now
@@ -819,6 +949,11 @@ func (e *Engine) gc() {
 	for id, t := range e.done {
 		if now.Sub(t) > 24*time.Hour {
 			delete(e.done, id)
+		}
+	}
+	for id, t := range e.served {
+		if now.Sub(t.finished) > e.cfg.ResendHold {
+			delete(e.served, id)
 		}
 	}
 	for h, t := range e.sentAt {

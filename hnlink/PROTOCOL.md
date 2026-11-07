@@ -225,6 +225,13 @@ A station sends its INV:
   `InvDebounce`);
 - every `InvEvery` in any case.
 
+A beacon can be lost: a repeater's identification or another station's
+transmission can cover it. If a station has sent an INV, a live peer's
+inventory still differs from its own, and it has heard nothing since the
+beacon went out, it sends the INV again after a randomised `BeaconRetry`,
+up to `BeaconRetries` times. A station that is in step with its peers does
+not retry, so a quiet net sends nothing extra.
+
 It polls its news server every `RefreshEvery` for articles it doesn't yet know, and
 treats any it finds as changes.
 
@@ -334,6 +341,7 @@ the command line.
 | TxDelay | 300 ms | | RefreshEvery | 2 min |
 | Burst | 6 | | PeerTTL | 2 h |
 | Quiet | 3 s | | ResendHold | 1 h |
+| BeaconRetry | 3 min | | BeaconRetries | 2 |
 | Overhead | 0.15 | | Listen | 10 s |
 | MaxObject | 48 KiB | | NeedSpread | 6 s |
 | MaxRounds | 4 | | window | 14 days |
