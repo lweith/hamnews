@@ -96,3 +96,32 @@ func TestBeaconNoRetryWhenHeard(t *testing.T) {
 		t.Fatalf("sent %d beacons, want 2 (answered beacon must not be retried)", n)
 	}
 }
+
+// A peer that restarts starts its generation over. We must answer its beacon
+// even though we already know it, or it never learns we exist.
+func TestBeaconAnswersRestartedPeer(t *testing.T) {
+	_, r, stop := retryEngine(t, 0, time.Hour)
+	defer stop()
+	// Establish the peer at generation 9.
+	r.in <- (&wire.Inv{Gen: 9, Part: 0, Parts: 1, Origin: "W6ABC"}).Marshal()
+	time.Sleep(200 * time.Millisecond)
+	before := r.count()
+	// Same peer, generation back at 1: it restarted.
+	r.in <- (&wire.Inv{Gen: 1, Part: 0, Parts: 1, Origin: "W6ABC"}).Marshal()
+	waitFor(t, func() bool { return r.count() > before })
+}
+
+// An ordinary change from a known peer, with a higher generation, must not
+// cause a reply on its own.
+func TestNoBeaconForAdvancingPeer(t *testing.T) {
+	_, r, stop := retryEngine(t, 0, time.Hour)
+	defer stop()
+	r.in <- (&wire.Inv{Gen: 9, Part: 0, Parts: 1, Origin: "W6ABC"}).Marshal()
+	time.Sleep(200 * time.Millisecond)
+	before := r.count()
+	r.in <- (&wire.Inv{Gen: 10, Part: 0, Parts: 1, Origin: "W6ABC"}).Marshal()
+	time.Sleep(500 * time.Millisecond)
+	if n := r.count(); n != before {
+		t.Fatalf("sent %d extra beacons for an advancing peer, want none", n-before)
+	}
+}

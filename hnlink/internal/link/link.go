@@ -25,6 +25,7 @@ package link
 
 import (
 	"bytes"
+	"hash/fnv"
 	"io"
 	"log"
 	"math"
@@ -61,7 +62,16 @@ type Config struct {
 	Burst   int           // frames per key-up
 	Quiet   time.Duration // channel must be idle this long before keying
 
-	InvEvery     time.Duration // periodic inventory beacon
+	// Mode is "simplex" (default: a station relays for peers it can reach) or
+	// "repeater" (everyone hears everyone). In repeater mode every station listens
+	// all the time and transmits only in its own slot, which is offset from the
+	// shared UTC period by its callsign, and only when it has something to say:
+	// a new or restarted peer to answer, articles either side lacks, or a
+	// heartbeat.
+	Mode      string
+	Heartbeat time.Duration // repeater mode: beacon at least this often
+
+	InvEvery     time.Duration // periodic inventory beacon (repeater mode: the slot period)
 	InvDebounce  time.Duration // delay after a change before beaconing
 	RefreshEvery time.Duration // poll the local server for new articles
 	PeerTTL      time.Duration // forget a peer not heard this long
@@ -89,6 +99,7 @@ func Defaults(call string) Config {
 	return Config{
 		Call: strings.ToUpper(call), SymSize: 192,
 		Bitrate: 1200, TxDelay: 300 * time.Millisecond, Burst: 6, Quiet: 3 * time.Second,
+		Mode: "simplex", Heartbeat: time.Hour,
 		InvEvery: 30 * time.Minute, InvDebounce: 20 * time.Second, RefreshEvery: 2 * time.Minute,
 		PeerTTL: 2 * time.Hour, ResendHold: time.Hour,
 		BeaconRetry: 3 * time.Minute, BeaconRetries: 2,
@@ -142,6 +153,8 @@ type Engine struct {
 	ingested    map[wire.AHash]ingest // radio arrivals not yet visible via NEWNEWS
 	gen         uint16
 	invTimer    *time.Timer
+	owed        bool      // repeater mode: a peer is waiting for our inventory
+	lastInv     time.Time // when our last INV was sent
 	beaconAt    time.Time // when the last beacon finished transmitting
 	beaconTries int       // retries sent since the last scheduled beacon
 	retryTimer  *time.Timer
@@ -184,7 +197,7 @@ func New(cfg Config, tr Transport, st Store) *Engine {
 	if lg == nil {
 		lg = log.New(io.Discard, "", 0)
 	}
-	return &Engine{cfg: cfg, tr: tr, st: st, lg: lg,
+	return &Engine{cfg: cfg, tr: tr, st: st, lg: lg, owed: cfg.Mode == "repeater",
 		ev: make(chan func(), 256), txq: make(chan txJob, 64), quit: make(chan struct{}),
 		local: map[wire.AHash]string{}, ingested: map[wire.AHash]ingest{}, peers: map[string]*peer{}, heard: map[string]time.Time{},
 		rx: map[wire.ObjID]*rxObj{}, served: map[wire.ObjID]*txObj{}, done: map[wire.ObjID]time.Time{}, sentAt: map[wire.AHash]time.Time{},
@@ -370,6 +383,9 @@ func (e *Engine) refresh() {
 }
 
 func (e *Engine) scheduleInv(d time.Duration) {
+	if e.repeater() {
+		d = e.untilSlot(time.Now())
+	}
 	if e.invTimer != nil {
 		e.invTimer.Stop()
 	}
@@ -440,6 +456,13 @@ func (e *Engine) invFrames() [][]byte {
 }
 
 func (e *Engine) sendInv() {
+	if e.repeater() {
+		if !e.wantToSay() {
+			return // synchronized: stay quiet and keep listening
+		}
+		e.owed = false
+		e.lastInv = time.Now()
+	}
 	f := e.invFrames()
 	e.lg.Printf("INV gen %d: %d articles in %d frame(s)", e.gen, len(e.local), len(f))
 	e.stopRetry()
@@ -518,6 +541,14 @@ func (e *Engine) onInv(from string, v *wire.Inv) {
 		e.peers[from] = p
 		e.lg.Printf("new peer %s", from)
 		// It needs our inventory to decide what it should send us.
+		e.owed = true
+		e.scheduleInv(e.jitter(e.cfg.InvDebounce))
+	} else if v.Part == 0 && p.have && v.Gen < p.gen {
+		// Generations only grow while a station runs, so a smaller one means
+		// the peer restarted. It has no heard list yet and won't elect to send
+		// to us until it hears our inventory, so answer as if it were new.
+		e.lg.Printf("peer %s restarted (gen %d, was %d)", from, v.Gen, p.gen)
+		e.owed = true
 		e.scheduleInv(e.jitter(e.cfg.InvDebounce))
 	}
 	p.seen = time.Now()
@@ -599,12 +630,69 @@ func Choose(me string, local map[wire.AHash]string, peers map[string]PeerView,
 
 func (e *Engine) livePeers() map[string]PeerView {
 	m := map[string]PeerView{}
+	var all map[string]bool
+	if e.repeater() {
+		all = map[string]bool{e.cfg.Call: true}
+	}
 	for call, p := range e.peers {
 		if p.have && time.Since(p.seen) < e.cfg.PeerTTL {
 			m[call] = PeerView{Inv: p.inv, Heard: p.heard}
+			if all != nil {
+				all[call] = true
+			}
+		}
+	}
+	if all != nil {
+		// On a repeater everyone hears everyone, so the election is simply the
+		// lowest holder.
+		for call := range m {
+			m[call] = PeerView{Inv: m[call].Inv, Heard: all}
 		}
 	}
 	return m
+}
+
+func (e *Engine) repeater() bool { return e.cfg.Mode == "repeater" }
+
+// slotOffset places this station's slot in the shared period. The callsign
+// hash spreads stations out; the UTC clock keeps the slots aligned.
+func slotOffset(call string, period time.Duration) time.Duration {
+	h := fnv.New64a()
+	h.Write([]byte(call))
+	return time.Duration(h.Sum64() % uint64(period))
+}
+
+// untilSlot is how long from now until this station's next slot.
+func (e *Engine) untilSlot(now time.Time) time.Duration {
+	p := int64(e.cfg.InvEvery)
+	off := int64(slotOffset(e.cfg.Call, e.cfg.InvEvery))
+	d := (off - now.UnixNano()%p) % p
+	if d < 0 {
+		d += p
+	}
+	return time.Duration(d)
+}
+
+// wantToSay reports whether an INV is useful now (repeater mode): a peer is
+// waiting for it, a live peer lacks something we hold, or the heartbeat is due.
+func (e *Engine) wantToSay() bool {
+	if e.owed || time.Since(e.lastInv) >= e.cfg.Heartbeat {
+		return true
+	}
+	for _, p := range e.peers {
+		if !p.have || time.Since(p.seen) >= e.cfg.PeerTTL {
+			continue
+		}
+		// Only the peer's need counts. Articles it holds that we lack are not a
+		// reason to beacon: innd may refuse them, and the peer already knows
+		// what we hold from our last INV.
+		for h := range e.local {
+			if !p.inv[h] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (e *Engine) runElection() {
@@ -1006,6 +1094,7 @@ type ObjStatus struct {
 
 type Status struct {
 	Call      string       `json:"call"`
+	Mode      string       `json:"mode"`
 	Local     int          `json:"local_articles"`
 	Gen       uint16       `json:"gen"`
 	Neighbors []string     `json:"neighbors"`
@@ -1019,7 +1108,7 @@ type Status struct {
 func (e *Engine) Snapshot() Status {
 	var st Status
 	e.Do(func(e *Engine) {
-		st = Status{Call: e.cfg.Call, Local: len(e.local), Gen: e.gen, Neighbors: e.neighbors(),
+		st = Status{Call: e.cfg.Call, Mode: e.cfg.Mode, Local: len(e.local), Gen: e.gen, Neighbors: e.neighbors(),
 			Queued: len(e.txQueue), Stats: e.Stats}
 		for call, p := range e.peers {
 			ps := PeerStatus{Call: call, LastHeard: e.heard[call], HearsUs: p.heard[e.cfg.Call]}

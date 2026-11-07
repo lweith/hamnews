@@ -1,0 +1,10 @@
+# PLACEHOLDER: audio device for this radio (check with arecord -l).
+ADEVICE plughw:2,0 plughw:2,0
+ARATE 48000
+CHANNEL 0
+MYCALL KN6FLN-6
+MODEM 1200
+# PLACEHOLDER: PTT method for this radio's interface.
+# PTT GPIO 3
+KISSPORT 8002
+AGWPORT 8010

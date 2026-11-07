@@ -27,6 +27,7 @@ import (
 
 	"hamnews/hnlink/internal/kiss"
 	"hamnews/hnlink/internal/link"
+	"hamnews/hnlink/internal/metrics"
 	"hamnews/hnlink/internal/nntp"
 	"hamnews/hnlink/internal/rnews"
 	"hamnews/hnlink/internal/web"
@@ -34,7 +35,9 @@ import (
 
 const version = "0.1"
 
-const defaultGroups = "*,!control,!control.*,!junk"
+// Carry every group, control articles included: innd applies newgroup and
+// rmgroup under its control.ctl rules, so hnlink stays a dumb pipe.
+const defaultGroups = "*"
 
 func usage() {
 	fmt.Fprint(os.Stderr, `usage:
@@ -100,9 +103,11 @@ func cmdRun(args []string) error {
 	burst := fs.Int("burst", 6, "frames per key-up")
 	quiet := fs.Duration("quiet", 3*time.Second, "channel must be idle this long before transmitting")
 	symsize := fs.Int("symsize", 192, "symbol bytes per frame (multiple of 64)")
+	mode := fs.String("mode", "simplex", "simplex: relay for peers you can reach; repeater: everyone hears everyone, listen always, transmit in a callsign slot only when there is something to say")
 	inv := fs.Duration("inv", 30*time.Minute, "inventory beacon interval")
 	verbose := fs.Bool("v", false, "log protocol detail")
 	httpAddr := fs.String("http", "127.0.0.1:8073", "status/posting page address (\"\" to disable)")
+	metricsAddr := fs.String("metrics", "127.0.0.1:9178", "Prometheus /metrics address; bind a LAN address to let a remote scraper in (\"\" to disable)")
 	from := fs.String("from", "", "From: for posts made on the page (default: the callsign)")
 	logFile := fs.String("log", "", "also append the log to this file")
 	fs.Parse(args)
@@ -120,6 +125,10 @@ func cmdRun(args []string) error {
 	if cfg.SymSize%64 != 0 || cfg.SymSize < 64 || cfg.SymSize > 1024 {
 		return errors.New("--symsize must be a multiple of 64 between 64 and 1024")
 	}
+	if *mode != "simplex" && *mode != "repeater" {
+		return errors.New("--mode must be simplex or repeater")
+	}
+	cfg.Mode = *mode
 	if cfg.Burst < 1 || cfg.Bitrate <= 0 {
 		return errors.New("--burst and --bitrate must be positive")
 	}
@@ -166,6 +175,15 @@ func cmdRun(args []string) error {
 		}
 		logger.Printf("page: http://%s/", strings.Replace(ln.Addr().String(), "127.0.0.1", "localhost", 1))
 		go http.Serve(ln, ws.Handler())
+	}
+
+	if *metricsAddr != "" {
+		ln, err := net.Listen("tcp", *metricsAddr)
+		if err != nil {
+			return fmt.Errorf("--metrics %s: %w", *metricsAddr, err)
+		}
+		logger.Printf("metrics: http://%s/metrics", ln.Addr())
+		go http.Serve(ln, metrics.Handler(cur.Load, version))
 	}
 
 	sig := make(chan os.Signal, 1)

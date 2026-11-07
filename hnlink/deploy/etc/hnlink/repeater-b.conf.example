@@ -1,0 +1,9 @@
+# /etc/hnlink/<instance>.conf for the second repeater on the same host.
+CALL=KN6FLN-6
+FROM=
+KISS=127.0.0.1:8002
+NNTP=10.99.0.4:119
+HTTP=127.0.0.1:8074
+METRICS=127.0.0.1:9179
+MODE=repeater
+OPTS=

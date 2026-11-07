@@ -1,0 +1,14 @@
+# /etc/direwolf/<instance>.conf. Replace the audio device and channel settings
+# with the ones for this radio (see direwolf's documentation).
+# PLACEHOLDER: audio device for this radio (check with arecord -l).
+ADEVICE plughw:1,0 plughw:1,0
+ARATE 48000
+CHANNEL 0
+MYCALL KN6FLN-5
+MODEM 1200
+# PLACEHOLDER: PTT method for this radio's interface (CM108, GPIO, or CAT).
+# PTT GPIO 3
+# KISS and AGW on localhost only: direwolf binds all interfaces unless a
+# firewall says otherwise, so keep these ports unique per instance.
+KISSPORT 8001
+AGWPORT 8000

@@ -1,0 +1,17 @@
+# The TNC for one radio channel: direwolf@repeater-a.service reads
+# /etc/direwolf/repeater-a.conf. Keep its state under /var/lib, not /var/tmp.
+[Unit]
+Description=direwolf TNC (%i)
+After=network.target sound.target
+
+[Service]
+ExecStart=/usr/bin/direwolf -t 0 -c /etc/direwolf/%i.conf
+StateDirectory=direwolf/%i
+WorkingDirectory=/var/lib/direwolf/%i
+Restart=on-failure
+RestartSec=15
+# The audio group gives direwolf the soundcard for this radio.
+SupplementaryGroups=audio
+
+[Install]
+WantedBy=multi-user.target

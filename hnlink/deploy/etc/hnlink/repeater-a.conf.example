@@ -1,0 +1,14 @@
+# /etc/hnlink/<instance>.conf. After editing: systemctl restart hnlink@<instance>
+# Every station on the net needs a unique CALL-SSID; see INSTANCES.md.
+CALL=KN6FLN-5
+FROM=
+# KISS from this channel's direwolf (localhost only).
+KISS=127.0.0.1:8001
+# The innd shared by every instance on this host.
+NNTP=10.99.0.4:119
+# Ports unique to this instance; see INSTANCES.md.
+HTTP=127.0.0.1:8073
+METRICS=127.0.0.1:9178
+# Repeater mode, as on the other stations of this channel.
+MODE=repeater
+OPTS=

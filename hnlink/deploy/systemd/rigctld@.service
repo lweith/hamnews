@@ -1,0 +1,15 @@
+# Radio control for one channel (frequency and PTT, if used):
+# rigctld@repeater-a.service reads /etc/rigctld/repeater-a.env.
+[Unit]
+Description=rigctld (%i)
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/rigctld/%i.env
+ExecStart=/usr/bin/rigctld -m ${RIG_MODEL} -r ${RIG_DEVICE} -s ${RIG_SPEED} -T 127.0.0.1 -t ${RIG_PORT}
+Restart=on-failure
+RestartSec=15
+SupplementaryGroups=dialout
+
+[Install]
+WantedBy=multi-user.target

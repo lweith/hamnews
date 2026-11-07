@@ -1,0 +1,35 @@
+# One hnlink per radio channel: hnlink@repeater-a.service reads
+# /etc/hnlink/repeater-a.conf. Every instance on a host shares one innd.
+[Unit]
+Description=hnlink (%i): hamnews exchange on one radio channel
+Documentation=file:///usr/share/doc/hnlink/README.md file:///usr/share/doc/hnlink/PROTOCOL.md
+After=network.target direwolf@%i.service
+Wants=direwolf@%i.service
+
+[Service]
+EnvironmentFile=/etc/hnlink/%i.conf
+# Not configured yet: skip quietly instead of failing in a loop.
+ExecCondition=/bin/sh -c 'test -n "$$CALL" || { echo "hnlink: set CALL in /etc/hnlink/%i.conf" >&2; exit 1; }'
+ExecStart=/usr/bin/hnlink run --call ${CALL} --kiss ${KISS} --nntp ${NNTP} --http ${HTTP} --metrics ${METRICS} --from ${FROM} --mode ${MODE} $OPTS
+Restart=on-failure
+RestartSec=15
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

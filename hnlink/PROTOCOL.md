@@ -219,7 +219,7 @@ Each station keeps:
 
 ### 4.1 Inventory beacons
 
-A station sends its INV:
+This section describes simplex mode (§4.5 covers repeater mode). A station sends its INV:
 - `InvDebounce` after its inventory or neighbour set changes;
 - shortly after first hearing a new station (a randomised delay of about
   `InvDebounce`);
@@ -313,6 +313,38 @@ held. When it defers any article of an object (for example, because the group do
 not exist yet), none of that object's articles are marked held, so peers offer them
 again.
 
+### 4.5 Repeater mode
+
+Repeater mode is for stations that all hear each other, such as stations on one
+repeater's output. Simplex mode routes through whichever station can reach a
+peer; repeater mode does not, and it stays quiet when there is nothing to say.
+
+- **Listen always.** A station decodes every frame it hears, as in simplex mode.
+- **Slots.** Beacons go out only in the station's slot. The period is `InvEvery`,
+  counted on the UTC clock, and the station's offset within it is a 64-bit FNV-1a
+  hash of its callsign, modulo the period. Every station computes the same
+  offsets from the same callsigns, so no coordination is needed. Stations must
+  keep their clocks within a few seconds of each other (NTP is enough); a station
+  whose clock is off may land in another station's slot.
+- **Speak only with something to say.** A slot carries an INV only when one of
+  these holds:
+  - a new or restarted peer is waiting for the station's inventory (§4.4 treats a
+    peer's generation going backwards as a restart);
+  - a live peer lacks an article the station holds;
+  - `Heartbeat` (default 1 h) has passed since the last INV.
+  
+  A station in step with its peers sends nothing. Articles a peer holds and the
+  station lacks are not a reason to beacon: the news server may refuse them, and
+  the peer already knows what the station holds from its last INV.
+- **Election.** Every station is treated as hearing every other, so §4.2 reduces to
+  "the lowest holder sends."
+- **Liveness.** Silence is ambiguous: a quiet station may be synchronized or gone.
+  The heartbeat bounds how long a peer stays silent, and a peer not heard for
+  `PeerTTL` is dropped as in simplex mode. Set `Heartbeat` below `PeerTTL`.
+
+Repeater mode is selected with `--mode repeater`. The default is `simplex`. The
+two modes are not interchangeable on one net: stations must agree on the mode.
+
 ## 5. Channel access and parameters
 
 ### 5.1 Carrier sense at the application layer
@@ -345,6 +377,7 @@ the command line.
 | Overhead | 0.15 | | Listen | 10 s |
 | MaxObject | 48 KiB | | NeedSpread | 6 s |
 | MaxRounds | 4 | | window | 14 days |
+| Mode | simplex | | Heartbeat | 1 h |
 
 Fixed values, not command-line settings: the ingest grace (10 minutes), the rx idle
 timeout (30 minutes), the done retention (24 hours), and the heard-list cap (32
@@ -390,6 +423,10 @@ for them.
   configuration.
 - **Rate and fairness.** There is no limit on how often a station can take the
   channel, beyond the timers above.
+- **Mode agreement.** Nothing on the air says which mode a net uses; stations
+  must be configured alike.
+- **Slot period.** The repeater-mode slot period is `InvEvery`, which is 30 min by
+  default. Latency for a missed object is bounded by one period plus a NEED round.
 - **Security.** Frames are not authenticated. Any station can send any frame with
   any source call. The protocol trusts the radio channel, not the sender. A station
   that wants to refuse an article must do so in its news server.
