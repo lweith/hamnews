@@ -56,6 +56,12 @@ arm64 and armhf are built under qemu-user (binfmt with the `F` flag). The INN
 tarball is fetched from ftp.isc.org and checked against Russ Allbery's signing key
 (bundled in `packaging/arch/keys/`).
 
+This repository does not contain INN's source. The upstream source is the INN git
+repository, https://github.com/InterNetNews/inn, tag `2.7.4`. The release tarball
+the build uses is the same release, and its signature is kept here
+(`packaging/upstream/inn-2.7.4.tar.gz.asc`). The one patch we apply to INN is
+`packaging/inn-2.7.4-disable-installing-files-using-the-owner-and-group-we-also-run-as.patch`.
+
 ## License
 
 INN is under its own permissive licenses (see its `LICENSE`). The hamnews packaging,

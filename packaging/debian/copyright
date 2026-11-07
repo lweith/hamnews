@@ -1,6 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: hamnews
 Source: https://www.isc.org/othersoftware/#INN
+ https://github.com/InterNetNews/inn (git, tag 2.7.4)
 
 Files: *
 Copyright: Internet Systems Consortium, Rich Salz, Russ Allbery and the INN contributors
