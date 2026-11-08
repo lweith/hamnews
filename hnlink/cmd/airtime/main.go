@@ -62,6 +62,9 @@ func main() {
 			log.Fatalf("--http %s: %v", *httpAddr, err)
 		}
 		log.Printf("airtime %s: page http://%s/  metrics http://%s/metrics", version, ln.Addr(), ln.Addr())
+		if host, _, err := net.SplitHostPort(ln.Addr().String()); err != nil || !isLoopback(host) {
+			log.Printf("WARNING: --http %s is not loopback: the page, /api/stats and /metrics have no authentication", ln.Addr())
+		}
 		go http.Serve(ln, st.Handler())
 	}
 	for {
@@ -208,4 +211,10 @@ func (p *pcapWriter) Write(t time.Time, frame []byte) error {
 	}
 	_, err := p.f.Write(frame)
 	return err
+}
+
+// isLoopback reports whether a listen host (an IP from ln.Addr) is loopback.
+func isLoopback(host string) bool {
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

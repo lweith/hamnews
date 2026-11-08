@@ -10,16 +10,19 @@ import (
 
 // Frame is what airtime knows about one AX.25 frame on the air.
 type Frame struct {
-	Port  int    // direwolf radio channel
-	TX    bool   // sent by this station (AGW 'T'), else heard (AGW 'K')
-	Src   string // CALL-SSID
-	Dst   string
-	Via   []string // digipeaters, "*" suffix once repeated
-	Type  string   // UI, I, RR, RNR, REJ, SREJ, SABM, SABME, DISC, DM, UA, FRMR, XID, TEST, U?
-	PID   int      // -1 if none
-	Info  int      // info field bytes
-	Bytes int      // whole frame without flags and FCS
-	Raw   []byte   // the frame: exact if heard, rebuilt from direwolf's monitor text if sent
+	Port int    // direwolf radio channel
+	TX   bool   // sent by this station (AGW 'T'), else heard (AGW 'K')
+	Src  string // CALL-SSID
+	Dst  string
+	Via  []string // digipeaters, "*" suffix once repeated
+	Type string   // UI, I, RR, RNR, REJ, SREJ, SABM, SABME, DISC, DM, UA, FRMR, XID, TEST, U?
+	PID  int      // -1 if none
+	Info int      // info field bytes
+	// Bytes: whole frame without flags and FCS. Exact when Raw is set; otherwise
+	// an estimate from the header fields (a sent frame whose monitor text was
+	// cut short, or one that build couldn't encode).
+	Bytes int
+	Raw   []byte // the frame: exact if heard, rebuilt from direwolf's monitor text if sent
 
 	Cmd    int  // 1 command, -1 response, 0 neither (AX.25 v1, or sloppy APRS)
 	PF     bool // poll (command) or final (response)
@@ -245,11 +248,21 @@ func ParseMonitor(port int, data []byte, mod128 func(a, b string) (bool, bool)) 
 	return fr, nil
 }
 
-func encCall(s string, last, h bool) []byte {
+// encCall encodes one address. It reports false for a callsign longer than
+// six characters, a blank one, or an SSID outside 0-15: those would be
+// silently changed on the way out, so the frame can't be rebuilt.
+func encCall(s string, last, h bool) ([]byte, bool) {
 	call, ssid := s, 0
 	if c, n, ok := strings.Cut(s, "-"); ok {
 		call = c
-		ssid, _ = strconv.Atoi(n)
+		v, err := strconv.Atoi(n)
+		if err != nil || v < 0 || v > 15 {
+			return nil, false
+		}
+		ssid = v
+	}
+	if call == "" || len(call) > 6 {
+		return nil, false
 	}
 	b := make([]byte, 7)
 	for i := 0; i < 6; i++ {
@@ -259,14 +272,14 @@ func encCall(s string, last, h bool) []byte {
 		}
 		b[i] = ch << 1
 	}
-	b[6] = 0x60 | byte(ssid&0x0f)<<1
+	b[6] = 0x60 | byte(ssid)<<1
 	if last {
 		b[6] |= 0x01
 	}
 	if h {
 		b[6] |= 0x80
 	}
-	return b
+	return b, true
 }
 
 var uCtl = map[string]byte{"UI": 0x03, "SABM": 0x2f, "SABME": 0x6f, "DISC": 0x43, "DM": 0x0f,
@@ -274,11 +287,24 @@ var uCtl = map[string]byte{"UI": 0x03, "SABM": 0x2f, "SABME": 0x6f, "DISC": 0x43
 var sCtl = map[string]byte{"RR": 0x01, "RNR": 0x05, "REJ": 0x09, "SREJ": 0x0d}
 
 // build makes a frame from its decoded fields.
+// It returns nil if an address can't be encoded exactly (see encCall).
 func build(fr *Frame) []byte {
-	b := encCall(fr.Dst, false, false)
-	b = append(b, encCall(fr.Src, len(fr.Via) == 0, false)...)
+	dst, ok := encCall(fr.Dst, false, false)
+	if !ok {
+		return nil
+	}
+	b := dst
+	src, ok := encCall(fr.Src, len(fr.Via) == 0, false)
+	if !ok {
+		return nil
+	}
+	b = append(b, src...)
 	for i, v := range fr.Via {
-		b = append(b, encCall(strings.TrimSuffix(v, "*"), i == len(fr.Via)-1, strings.HasSuffix(v, "*"))...)
+		via, ok := encCall(strings.TrimSuffix(v, "*"), i == len(fr.Via)-1, strings.HasSuffix(v, "*"))
+		if !ok {
+			return nil
+		}
+		b = append(b, via...)
 	}
 	// C bits: command in the destination's SSID byte, response in the
 	// source's. Neither said (PF=): a command, as most UI senders send.
