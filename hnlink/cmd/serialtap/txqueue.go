@@ -22,11 +22,14 @@ type txQueue struct {
 	bytes   int
 	budget  int
 	refused atomic.Int64
+	// ready gets a token when a frame is queued, so the sender can sleep
+	// until there is work.
+	ready chan struct{}
 }
 
 // newTxQueue sizes the queue for the given line rate and seconds of backlog.
 func newTxQueue(baud int, seconds int) *txQueue {
-	return &txQueue{budget: baud * seconds / 10}
+	return &txQueue{budget: baud * seconds / 10, ready: make(chan struct{}, 1)}
 }
 
 // push queues one KISS-encoded frame. It never blocks. It reports whether the
@@ -42,6 +45,10 @@ func (q *txQueue) push(encoded []byte) bool {
 	}
 	q.frames = append(q.frames, encoded)
 	q.bytes += len(encoded)
+	select {
+	case q.ready <- struct{}{}:
+	default:
+	}
 	return true
 }
 

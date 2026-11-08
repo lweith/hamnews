@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"sync"
 	"sync/atomic"
 )
 
@@ -31,7 +32,7 @@ func kissEncode(payload []byte) []byte {
 	return append(out, fend)
 }
 
-// client is one listener's consumer. Its queue is bounded, and a full queue
+// client is one connection's consumer. Its queue is bounded, and a full queue
 // drops this client's frames only. Station clients log each drop, since a
 // lost frame breaks their session; monitor drops are counted and not logged.
 type client struct {
@@ -69,9 +70,10 @@ func (c *client) offer(data, encoded []byte) {
 	}
 }
 
-// hub fans received frames out to clients. The clients are fixed when the
-// tap starts, from its config, so the list needs no locking.
+// hub fans frames out to every connected client. Clients come and go with
+// their TCP connections, so the list is guarded by a lock.
 type hub struct {
+	mu      sync.RWMutex
 	clients []*client
 }
 
@@ -79,9 +81,35 @@ func newHub(clients ...*client) *hub {
 	return &hub{clients: clients}
 }
 
-// deliver offers one received frame to every client.
+func (h *hub) add(c *client) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clients = append(h.clients, c)
+}
+
+func (h *hub) remove(c *client) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i, x := range h.clients {
+		if x == c {
+			h.clients = append(h.clients[:i], h.clients[i+1:]...)
+			return
+		}
+	}
+}
+
+// count reports how many clients are connected.
+func (h *hub) count() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients)
+}
+
+// deliver offers one frame to every client.
 func (h *hub) deliver(data []byte) {
 	enc := kissEncode(data)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	for _, c := range h.clients {
 		c.offer(data, enc)
 	}

@@ -1,16 +1,26 @@
 // serialtap sits in a serial link between a computer and a TNC. It passes every
 // byte both ways unchanged, decodes KISS frames as they go by, and counts them
-// for Prometheus. It is receive-only in effect: it never adds or changes bytes.
+// for Prometheus. Its TCP listeners give clients KISS frames, filtered per
+// listener, and read-write listeners can send frames to the TNC.
 //
 //	serialtap -a /dev/ttyV0 -b /dev/ttyUSB0 -baud 1200      tap a link
 //	serialtap -b /dev/ttyUSB0 -detect                       find the baud rate
 //
 // -a is the computer side, -b the TNC side. Both ends are set to 8N1 at the
 // given rate with stty.
+//
+// Listeners (all optional, each bound to the address you give):
+//
+//	-monitor 127.0.0.1:8100                   every frame, read-only
+//	-station 127.0.0.1:8101=W8HHF-10          frames to or from W8HHF-10, read-only
+//	-rw      127.0.0.1:8200[=FILTER]          receives like a station; its frames go to the TNC
+//	                                         (repeatable; no filter means it receives everything)
+//
+// Frames the tap sends to the TNC are whole frames, held back until the host's
+// stream is between frames, and paced to the line rate.
 package main
 
 import (
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -34,6 +44,13 @@ func main() {
 	sample := flag.Duration("sample", 10*time.Second, "how long to listen at each rate in -detect")
 	httpAddr := flag.String("http", "127.0.0.1:9181", "Prometheus metrics at /metrics (\"\" disables)")
 	logPath := flag.String("log", "", "append each KISS frame as a hex line (\"\" disables)")
+
+	monitors := listenFlag{kind: monitorListen}
+	stations := listenFlag{kind: stationListen}
+	rw := listenFlag{kind: rwListen}
+	flag.Var(&monitors, "monitor", "TCP ADDR for a monitor: every frame, read-only (repeatable)")
+	flag.Var(&stations, "station", "TCP ADDR=FILTER for a station: matching frames, read-only (repeatable)")
+	flag.Var(&rw, "rw", "TCP ADDR[=FILTER] for a read-write client: its frames go to the TNC (repeatable)")
 	flag.Parse()
 
 	if *detect {
@@ -83,41 +100,35 @@ func main() {
 	}
 	log.Printf("serialtap: %s <-> %s at %d 8N1", *a, *b, *baud)
 
-	done := make(chan error, 2)
-	go func() { done <- pump("host", fa, fb, st, logf) }()
-	go func() { done <- pump("tnc", fb, fa, st, logf) }()
-	err = <-done
-	log.Fatalf("serialtap: link stopped: %v", err)
-}
-
-// pump copies src to dst, byte for byte, and decodes what passes. The write
-// happens before any decoding, so the tap adds no delay to the link.
-func pump(dir string, src io.Reader, dst io.Writer, st *stats, logf *os.File) error {
-	var d kissDecoder
-	buf := make([]byte, 512)
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			if _, werr := dst.Write(buf[:n]); werr != nil {
-				return werr
-			}
-			st.addBytes(dir, n)
-			for _, x := range buf[:n] {
-				if f, ok := d.feed(x); ok {
-					st.addFrame(dir, f)
-					if logf != nil {
-						fmt.Fprintf(logf, "%s %s %d %d %s\n", time.Now().UTC().Format(time.RFC3339Nano),
-							dir, f.Port, f.Cmd, hex.EncodeToString(f.Data))
-					}
-				}
-			}
-			st.addErrors(dir, d.Errors)
-			d.Errors = 0
-		}
-		if err != nil {
-			return err
+	t := &tap{
+		st:   st,
+		logf: logf,
+		hub:  newHub(),
+		gate: newTNCGate(fb),
+		txq:  newTxQueue(*baud, defaultTxSeconds),
+	}
+	for _, sp := range monitors.specs {
+		if err := startListener(sp, t.hub, nil); err != nil {
+			log.Fatalf("-monitor %s: %v", sp.addr, err)
 		}
 	}
+	for _, sp := range stations.specs {
+		if err := startListener(sp, t.hub, nil); err != nil {
+			log.Fatalf("-station %s: %v", sp.addr, err)
+		}
+	}
+	for _, sp := range rw.specs {
+		if err := startListener(sp, t.hub, t.txq); err != nil {
+			log.Fatalf("-rw %s: %v", sp.addr, err)
+		}
+	}
+	go t.runTx(*baud)
+
+	done := make(chan error, 2)
+	go func() { done <- t.pump("host", fa, fb) }()
+	go func() { done <- t.pump("tnc", fb, fa) }()
+	err = <-done
+	log.Fatalf("serialtap: link stopped: %v", err)
 }
 
 // setSerial puts a device into raw 8N1 at the given rate.
