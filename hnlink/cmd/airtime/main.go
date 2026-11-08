@@ -25,9 +25,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-)
 
-var version = "0.2"
+	"hamnews/hnlink/internal/buildinfo"
+)
 
 func main() {
 	agw := flag.String("agw", "127.0.0.1:8000", "direwolf AGW port")
@@ -40,7 +40,7 @@ func main() {
 	ver := flag.Bool("version", false, "print version")
 	flag.Parse()
 	if *ver {
-		fmt.Println("airtime", version)
+		fmt.Println(buildinfo.Get().String("airtime"))
 		return
 	}
 	st := NewStats(*bitrate, *txdelay)
@@ -61,7 +61,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("--http %s: %v", *httpAddr, err)
 		}
-		log.Printf("airtime %s: page http://%s/  metrics http://%s/metrics", version, ln.Addr(), ln.Addr())
+		log.Printf("%s: page http://%s/  metrics http://%s/metrics", buildinfo.Get().String("airtime"), ln.Addr(), ln.Addr())
 		if host, _, err := net.SplitHostPort(ln.Addr().String()); err != nil || !isLoopback(host) {
 			log.Printf("WARNING: --http %s is not loopback: the page, /api/stats and /metrics have no authentication", ln.Addr())
 		}

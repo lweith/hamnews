@@ -70,3 +70,19 @@ a command. Wireshark needs `ax25.extended` for modulo-128 links.
 As a service: `/etc/airtime.conf`, `systemctl enable --now airtime`. direwolf needs
 `AGWPORT` (default 8000). Set `DNSSD 0` in direwolf.conf unless you want direwolf
 advertising its ports on the LAN.
+
+## Version
+
+`airtime -version` prints the semantic version (`buildinfo.Version`, bumped by
+hand) and the commit, dirty flag and build time the binary was built from. The
+same line starts the log. Set the commit and time at link time:
+
+```
+cd hnlink
+go build -ldflags "-X hamnews/hnlink/internal/buildinfo.commit=$(git -C .. rev-parse HEAD) \
+  -X hamnews/hnlink/internal/buildinfo.dirty=$(git -C .. diff --quiet && echo false || echo true) \
+  -X hamnews/hnlink/internal/buildinfo.built=$(date -u +%FT%TZ)" -o airtime ./cmd/airtime
+```
+
+A plain `go build` has no commit unless the toolchain embedded VCS data (it
+doesn't for this module layout), so the line then shows only the version.
