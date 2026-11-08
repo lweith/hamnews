@@ -27,7 +27,7 @@ import (
 	"time"
 )
 
-var version = "0.1"
+var version = "0.2"
 
 func main() {
 	agw := flag.String("agw", "127.0.0.1:8000", "direwolf AGW port")
@@ -36,6 +36,7 @@ func main() {
 	bitrate := flag.Float64("bitrate", 1200, "channel bit rate, for airtime estimates")
 	txdelay := flag.Duration("txdelay", 300*time.Millisecond, "key-up time added to each burst, for airtime estimates")
 	verbose := flag.Bool("v", false, "log every frame (a text packet trace)")
+	tocallsPath := flag.String("tocalls", "/usr/share/direwolf/tocalls.txt", "APRS tocall list, to name stations' software and radios (\"\" for none)")
 	ver := flag.Bool("version", false, "print version")
 	flag.Parse()
 	if *ver {
@@ -43,6 +44,11 @@ func main() {
 		return
 	}
 	st := NewStats(*bitrate, *txdelay)
+	tc, err := loadTocalls(*tocallsPath)
+	if err != nil {
+		log.Printf("-tocalls: %v (APRS devices named from Mic-E only)", err)
+	}
+	st.tocalls = tc
 	var tr *pcapWriter
 	if *pcap != "" {
 		var err error
@@ -128,12 +134,12 @@ func run(addr string, st *Stats, tr *pcapWriter, verbose bool) error {
 			if len(data) < 2 {
 				continue
 			}
-			fr, err = ParseAX25(data[1:])
+			fr, err = ParseAX25(data[1:], st.Mod128(int(h.Port)))
 			if fr != nil {
 				fr.Port = int(h.Port)
 			}
 		case 'T': // this station transmitted it
-			fr, err = ParseMonitor(int(h.Port), data)
+			fr, err = ParseMonitor(int(h.Port), data, st.Mod128(int(h.Port)))
 		default: // U/I/S: monitor text of heard frames; 'K' already has them exactly
 			continue
 		}
@@ -161,7 +167,14 @@ func run(addr string, st *Stats, tr *pcapWriter, verbose bool) error {
 			if fr.PID >= 0 {
 				pid = fmt.Sprintf(" pid=%02X", fr.PID)
 			}
-			log.Printf("%d %s %s>%s%s %s%s len=%d", fr.Port, dir, fr.Src, fr.Dst, via, fr.Type, pid, fr.Info)
+			seq := ""
+			if fr.NS >= 0 {
+				seq += fmt.Sprintf(" S%d", fr.NS)
+			}
+			if fr.NR >= 0 {
+				seq += fmt.Sprintf(" R%d", fr.NR)
+			}
+			log.Printf("%d %s %s>%s%s %s%s%s len=%d %s", fr.Port, dir, fr.Src, fr.Dst, via, fr.Type, seq, pid, fr.Info, fr.Class)
 		}
 	}
 }
