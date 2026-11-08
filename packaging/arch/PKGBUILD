@@ -62,7 +62,7 @@ check() {
 
 package_hamnews() {
   pkgdesc='Minimal INN news server for ham-radio usenet (rnews, FLAMP, hnlink)'
-  depends=(glibc gcc-libs systemd-libs)
+  depends=(glibc gcc-libs systemd-libs perl perl-mime-tools)
   optdepends=('hnlink: automatic exchange over a local radio net'
               'tin: console newsreader')
   install=hamnews.install
