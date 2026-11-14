@@ -6,6 +6,7 @@
 <style>
 body { font: 14px/1.4 system-ui, sans-serif; margin: 1.5em; color: #222; }
 h1 { font-size: 1.3em; margin: 0 0 .2em; }
+h2 { font-size: 1.1em; margin: 1.2em 0 .2em; }
 .sub { color: #666; margin-bottom: 1em; }
 table { border-collapse: collapse; margin: .5em 0 1.5em; }
 th, td { padding: .25em .7em; text-align: right; border-bottom: 1px solid #eee; }
@@ -14,6 +15,7 @@ td.l, th.l { text-align: left; }
 .tx { background: #fff7e6; }
 .bar { display: inline-block; height: .7em; background: #4a7; vertical-align: middle; }
 .down { color: #b00; font-weight: 600; }
+.bad { color: #b00; }
 code { font-size: .95em; }
 </style>
 </head>
@@ -22,27 +24,56 @@ code { font-size: .95em; }
 <div class="sub" id="sub">loading…</div>
 <h2>Channels</h2>
 <table id="ch"><thead><tr><th class="l">port</th><th class="l">name</th><th>stations</th><th>busy 1 min</th><th>5 min</th><th>15 min</th></tr></thead><tbody></tbody></table>
+<h2>Traffic</h2>
+<table id="cl"><thead><tr><th>port</th><th class="l">class</th><th class="l">dir</th><th>frames</th><th>bytes</th><th>airtime</th></tr></thead><tbody></tbody></table>
+<h2>Connected-mode sessions</h2>
+<table id="ss"><thead><tr><th class="l">from → to</th><th class="l">opened</th><th>mod</th><th>setup</th><th>length</th><th class="l">closed</th>
+<th>data →</th><th>resent →</th><th>data ←</th><th>resent ←</th><th>I frames → / ←</th><th>REJ/SREJ</th><th>polls</th><th>RNR</th></tr></thead><tbody></tbody></table>
+<h2>APRS stations</h2>
+<table id="ap"><thead><tr><th>port</th><th class="l">call-SSID</th><th class="l">device</th><th>packets</th><th class="l">kinds</th><th class="l">position</th><th class="l">last packet</th><th class="l">path</th><th class="l">last heard</th></tr></thead><tbody></tbody></table>
 <h2>Stations</h2>
-<table id="st"><thead><tr><th>port</th><th class="l">call-SSID</th><th class="l">dir</th><th>frames</th><th>bytes</th><th>airtime</th><th class="l">types</th><th class="l">PIDs</th><th class="l">top destinations</th><th>via digi</th><th class="l">last heard</th></tr></thead><tbody></tbody></table>
+<table id="st"><thead><tr><th>port</th><th class="l">call-SSID</th><th class="l">dir</th><th>frames</th><th>bytes</th><th>airtime</th><th class="l">classes</th><th class="l">types</th><th class="l">PIDs</th><th class="l">top destinations</th><th>via digi</th><th class="l">last heard</th></tr></thead><tbody></tbody></table>
 <div class="sub">Airtime is estimated from frame length, bit rate and one key-up per burst. <code>tx</code> rows (shaded) are this station.
+Session data is I-frame info bytes: first sendings (data) and frames sent again (resent); → is from the station that opened the session.
 Data: <a href="api/stats">api/stats</a> · <a href="metrics">metrics</a></div>
 <script>
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const pct = x => (100 * (x || 0)).toFixed(1) + '%';
 const top = (m, n) => Object.entries(m || {}).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => esc(k) + ' ' + v).join(', ');
 const ago = t => { const s = Math.round((Date.now() - Date.parse(t)) / 1000); return s < 90 ? s + ' s ago' : s < 5400 ? Math.round(s / 60) + ' min ago' : Math.round(s / 3600) + ' h ago'; };
-const dur = s => s < 120 ? s.toFixed(1) + ' s' : (s / 60).toFixed(1) + ' min';
+const dur = s => s < 120 ? s.toFixed(1) + ' s' : s < 7200 ? (s / 60).toFixed(1) + ' min' : (s / 3600).toFixed(1) + ' h';
+const by = n => n < 2048 ? n + ' B' : (n / 1024).toFixed(1) + ' KiB';
+const when = t => new Date(t).toLocaleString();
+const pos = a => a.lat == null ? '' : `<a href="https://www.openstreetmap.org/?mlat=${a.lat}&mlon=${a.lon}#map=12/${a.lat}/${a.lon}">${a.lat.toFixed(4)}, ${a.lon.toFixed(4)}</a>`;
+function session(s, open) {
+  const [a, b] = s.dirs;
+  const bad = n => n ? `<span class="bad">${n}</span>` : '0';
+  return `<tr><td class="l">${esc(s.from)} → ${esc(s.to)}</td><td class="l">${when(s.opened)}${s.opening === 'in progress' ? ' (in progress)' : ''}</td>` +
+    `<td>${s.modulo || '?'}</td><td>${s.setup_s ? dur(s.setup_s) : ''}</td><td>${dur(s.duration_s)}</td>` +
+    `<td class="l">${open ? '<b>open</b>' : esc(s.closing) + ' ' + ago(s.closed)}</td>` +
+    `<td>${by(a.new_bytes)}</td><td>${bad(a.info_bytes - a.new_bytes && by(a.info_bytes - a.new_bytes))}</td>` +
+    `<td>${by(b.new_bytes)}</td><td>${bad(b.info_bytes - b.new_bytes && by(b.info_bytes - b.new_bytes))}</td>` +
+    `<td>${a.iframes} / ${b.iframes}</td><td>${bad(a.rej + a.srej + b.rej + b.srej)}</td><td>${bad(a.polls + b.polls)}</td><td>${a.rnr + b.rnr}</td></tr>`;
+}
 async function tick() {
   try {
     const d = await (await fetch('api/stats')).json();
     document.getElementById('sub').innerHTML = (d.agw_connected ? 'connected to direwolf' : '<span class="down">not connected to direwolf</span>') +
-      ' · watching since ' + new Date(d.since).toLocaleString() + ' · ' + d.bitrate + ' bit/s';
+      ' · watching since ' + when(d.since) + ' · ' + d.bitrate + ' bit/s';
     document.querySelector('#ch tbody').innerHTML = (d.channels || []).map(c =>
       `<tr><td class="l">${c.port}</td><td class="l">${esc(c.name || '')}</td><td>${c.calls}</td>` +
       ['1m', '5m', '15m'].map(w => `<td><span class="bar" style="width:${Math.round(100 * (c.busy[w] || 0))}px"></span> ${pct(c.busy[w])}</td>`).join('') + '</tr>').join('');
+    document.querySelector('#cl tbody').innerHTML = (d.classes || []).map(c =>
+      `<tr class="${c.dir}"><td>${c.port}</td><td class="l">${esc(c.class)}</td><td class="l">${c.dir}</td><td>${c.frames}</td><td>${by(c.bytes)}</td><td>${dur(c.airtime_s)}</td></tr>`).join('');
+    const ss = d.sessions || {};
+    document.querySelector('#ss tbody').innerHTML = (ss.open || []).map(s => session(s, true)).join('') + (ss.closed || []).slice(0, 30).map(s => session(s, false)).join('');
+    document.querySelector('#ap tbody').innerHTML = (d.aprs || []).map(a =>
+      `<tr class="${a.dir}"><td>${a.port}</td><td class="l">${esc(a.call)}</td><td class="l">${esc(a.device || '')}</td><td>${a.packets}</td><td class="l">${top(a.kinds, 4)}</td>` +
+      `<td class="l">${pos(a)}</td><td class="l">${esc(a.last_packet.kind)}${a.last_packet.to ? ' to ' + esc(a.last_packet.to) : ''}: ${esc(a.last_packet.comment || '')}</td>` +
+      `<td class="l">${esc(a.dest)}${a.path ? ',' + esc(a.path) : ''}</td><td class="l">${ago(a.last)}</td></tr>`).join('');
     document.querySelector('#st tbody').innerHTML = (d.stations || []).map(r =>
       `<tr class="${r.dir}"><td>${r.port}</td><td class="l">${esc(r.call)}</td><td class="l">${r.dir}</td><td>${r.frames}</td><td>${r.bytes}</td>` +
-      `<td>${dur(r.airtime_s)}</td><td class="l">${top(r.types, 6)}</td><td class="l">${top(r.pids, 3)}</td><td class="l">${top(r.dests, 3)}</td><td>${r.via}</td><td class="l">${ago(r.last)}</td></tr>`).join('');
+      `<td>${dur(r.airtime_s)}</td><td class="l">${top(r.classes, 4)}</td><td class="l">${top(r.types, 6)}</td><td class="l">${top(r.pids, 3)}</td><td class="l">${top(r.dests, 3)}</td><td>${r.via}</td><td class="l">${ago(r.last)}</td></tr>`).join('');
   } catch (e) {
     document.getElementById('sub').innerHTML = '<span class="down">airtime not answering</span>';
   }

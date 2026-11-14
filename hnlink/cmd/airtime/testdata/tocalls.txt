@@ -1,0 +1,7 @@
+<title>
+APRS TO-CALL VERSION NUMBERS (a few lines in the layout of WB4APR's list)
+</title>
+      APAWxx  AGWPE
+ APD  APDWxx  Dire Wolf, WB2OSZ
+      APK003  Kenwood TH-D72
+      APK005  Kenwood TH-D75
